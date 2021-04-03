@@ -1,0 +1,24 @@
+FROM debian:stretch-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+ARG DEBIAN_PKGS=""
+RUN apt-get update -q
+RUN apt-get install -yq \
+  arping \
+  git \
+  hping3 \
+  iputils-ping \
+  net-tools \
+  sudo \
+  traceroute \
+  ${DEBIAN_PKGS}
+
+ARG INSTALL_FLAGS="-fnv"
+WORKDIR /root/mininet
+COPY . .
+RUN sh -c "./util/install.sh ${INSTALL_FLAGS}"
+
+RUN apt-get clean
+
+RUN chmod +x ./util/docker/entrypoint.sh
