@@ -1,0 +1,7 @@
+ARG REGISTRY="ghcr.io"
+ARG REG_USER="mininet"
+ARG BASE_VERSION=unversioned
+
+FROM ${REGISTRY}/${REG_USER}/mininet:base-${BASE_VERSION}
+
+ENTRYPOINT [ "./util/docker/entrypoint.sh" ]
