@@ -58,6 +58,10 @@ class REST(Bottle):
         self.route(self.prefix+'/pingset', callback=self.__pingSet)
         self.route(self.prefix+'/pingall', callback=self.__pingAll)
         self.route(self.prefix+'/iperfpair', callback=self.__iperfPair)
+        self.route(self.prefix+'/node/<node_name>/cmd',
+                   method='POST', callback=self.__runCmd)
+        self.route(self.prefix+'/node/<node_name>/monitor',
+                   callback=self.__monitorNodeCmd)
 
         try:
             self.run(host='0.0.0.0', port=port, quiet=True)
@@ -85,7 +89,8 @@ class REST(Bottle):
     def __returnPingData(self, pingData):
         data = {}
         for response in pingData:
-            data[response[0].name] = {
+            data[("%s-%s" % (response[0].name, response[1].name))] = {
+                "source": response[0].name,
                 "destination": response[1].name,
                 "sent": response[2][0],
                 "received": response[2][1],
@@ -142,5 +147,29 @@ class REST(Bottle):
         data = {
             "client_speed": results[1],
             "server_speed": results[0]
+        }
+        return self.__build_response(data)
+
+    def __runCmd(self, node_name):
+        if not node_name in self.mn:
+            data = {"error": "node does not exist"}
+            return self.__build_response(data, code=400)
+        node = self.mn.get(node_name)
+        body = request.json
+        commandStr = body.get("command", "")
+        node.sendCmd(commandStr)
+        data = {
+            "sent": "command has been sent to the node"
+        }
+        return self.__build_response(data)
+
+    def __monitorNodeCmd(self, node_name):
+        if not node_name in self.mn:
+            data = {"error": "node does not exist"}
+            return self.__build_response(data, code=400)
+        node = self.mn.get(node_name)
+        output = node.monitor(timeoutms=2000)
+        data = {
+            "node_output": output
         }
         return self.__build_response(data)
