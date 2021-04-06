@@ -27,6 +27,7 @@ if 'PYTHONPATH' in os.environ:
 
 from mininet.clean import cleanup
 import mininet.cli
+import mininet.rest
 from mininet.log import lg, LEVELS, info, debug, warn, error, output
 from mininet.net import Mininet, MininetWithControlNet, VERSION
 from mininet.node import ( Host, CPULimitedHost, Controller, OVSController,
@@ -97,6 +98,7 @@ TESTS = { name: True
           for name in ( 'pingall', 'pingpair', 'iperf', 'iperfudp' ) }
 
 CLI = None  # Set below if needed
+REST = None
 
 # Locally defined tests
 def allTest( net ):
@@ -299,7 +301,8 @@ class MininetRunner( object ):
                          metavar='block|random',
                          help=( 'node placement for --cluster '
                                 '(experimental!) ' ) )
-
+        opts.add_option( '--rest', action='store_true',
+                         default=False, help='Run a REST API for node interaction' )
         self.options, self.args = opts.parse_args()
 
         # We don't accept extra arguments after the options
@@ -324,7 +327,7 @@ class MininetRunner( object ):
     def begin( self ):
         "Create and run mininet."
 
-        global CLI
+        global CLI, REST
 
         opts = self.options
 
@@ -398,7 +401,7 @@ class MininetRunner( object ):
                   xterms=opts.xterms, autoSetMacs=opts.mac,
                   autoStaticArp=opts.arp, autoPinCpus=opts.pin,
                   waitConnected=opts.wait,
-                  listenPort=opts.listenport )
+                  listenPort=opts.listenport, rest=opts.rest )
 
         if opts.ensure_value( 'nat', False ):
             with open( '/etc/resolv.conf' ) as f:
@@ -414,6 +417,10 @@ class MininetRunner( object ):
             CLI( mn, script=opts.pre )
 
         mn.start()
+
+        if opts.rest:
+            REST = mininet.rest.REST if REST is None else REST
+            REST( mn )
 
         if opts.test:
             runTests( mn, opts.test )
