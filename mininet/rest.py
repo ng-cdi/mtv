@@ -28,6 +28,8 @@ from mininet.log import error as mnerror
 # TODO: Add common error handlers
 # TODO: Graceful exit
 # TODO: Custom command endpoint
+# TODO: Document
+# TODO: Format to the project style (not pep8)
 
 
 class REST(Bottle):
@@ -51,13 +53,15 @@ class REST(Bottle):
 
     def run_server(self, port):
         self.route(self.prefix+'/nodes', callback=self.__getNodes)
+        self.route(self.prefix+'/node/<node_name>', callback=self.__getNode)
         self.route(self.prefix+'/stop', callback=self.__stop)
-        self.route(self.prefix+'/pingpair', callback=self.__pingPair)
+        self.route(self.prefix+'/pingset', callback=self.__pingSet)
+        self.route(self.prefix+'/pingall', callback=self.__pingAll)
+        self.route(self.prefix+'/iperfpair', callback=self.__iperfPair)
 
         try:
             self.run(host='0.0.0.0', port=port, quiet=True)
-        except Exception as e:
-            print(e)
+        except Exception:
             mnerror('Failed to start REST API\n')
 
     def __build_response(self, data, code=200):
@@ -65,6 +69,29 @@ class REST(Bottle):
             data = json.dumps({"error": "could not create json response"})
             return HTTPResponse(status=500, body=data)
         return HTTPResponse(status=code, body=data)
+
+    def __getHostSet(self, host_names):
+        if host_names == '':
+            return None, "no hosts given"
+        host_names = host_names.split(',')
+        if len(host_names) < 2:
+            return None, "not enough hosts"
+        for host in host_names:
+            host = str(host)
+            if not host in self.mn:
+                return None, "non-existent host given"
+        return self.mn.get(*host_names), ""
+
+    def __returnPingData(self, pingData):
+        data = {}
+        for response in pingData:
+            data[response[0].name] = {
+                "destination": response[1].name,
+                "sent": response[2][0],
+                "received": response[2][1],
+                "rtt_avg": response[2][3]
+            }
+        return self.__build_response(data)
 
     def __stop(self):
         self.mn.stop()
@@ -76,27 +103,44 @@ class REST(Bottle):
         data = {"nodes": [node for node in self.mn]}
         return self.__build_response(data)
 
-    def __pingPair(self):
-        a = request.query.host_a
-        b = request.query.host_b
-        if a == '' or b == '':
-            data = {"error": "two hosts (host_a, host_b) must be given"}
+    def __getNode(self, node_name):
+        if not node_name in self.mn:
+            data = {"error": "node does not exist"}
             return self.__build_response(data, code=400)
-        if not self.mn.get(a, b):
-            data = {"error": "non-existent host given"}
-            return self.__build_response(data, code=400)
-        hosts = self.mn.get(a, b)
-        results = self.mn.pingFull(hosts=hosts)
+        node = self.mn.get(node_name)
         data = {
-            results[0][0].name: {
-                "destination": results[0][1].name,
-                "sent": results[0][2][0],
-                "received": results[0][2][1]
-            },
-            results[1][0].name: {
-                "destination": results[1][1].name,
-                "sent": results[1][2][0],
-                "received": results[1][2][1]
-            }
+            "name": node.name,
+            "class": node.__class__.__name__
         }
         return self.__build_response(data, code=200)
+
+    def __pingSet(self):
+        hosts, error = self.__getHostSet(request.query.hosts)
+        if not hosts:
+            data = {"error": error}
+            return self.__build_response(data, code=400)
+        results = self.mn.pingFull(hosts=hosts)
+        return self.__returnPingData(results)
+
+    def __pingAll(self):
+        results = self.mn.pingAllFull()
+        return self.__returnPingData(results)
+
+    def __iperfPair(self):
+        hosts, error = self.__getHostSet(request.query.hosts)
+        if not hosts:
+            data = {"error": error}
+            return self.__build_response(data, code=400)
+        if len(hosts) > 2:
+            data = {"error": "iperf only supports a set of 2 hosts"}
+            return self.__build_response(data, code=400)
+        try:
+            results = self.mn.iperf(hosts=hosts)
+        except:
+            data = {"error": "iperf failed"}
+            return self.__build_response(data, code=500)
+        data = {
+            "client_speed": results[1],
+            "server_speed": results[0]
+        }
+        return self.__build_response(data)
