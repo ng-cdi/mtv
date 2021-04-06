@@ -165,13 +165,13 @@ function mn_deps {
         $install gcc make socat psmisc xterm openssh-clients iperf \
             iproute telnet python-setuptools libcgroup-tools \
             ethtool help2man net-tools
-        $install ${PYPKG}-pyflakes pylint ${PYPKG}-pep8-naming  \
+        $install ${PYPKG}-bottle ${PYPKG}-pyflakes pylint ${PYPKG}-pep8-naming  \
             ${PYPKG}-pexpect
     elif [ "$DIST" = "SUSE LINUX"  ]; then
 		$install gcc make socat psmisc xterm openssh iperf \
 			iproute telnet ${PYPKG}-setuptools libcgroup-tools \
 			ethtool help2man python-pyflakes python3-pylint \
-                        python-pep8 ${PYPKG}-pexpect ${PYPKG}-tk
+                        python-pep8 ${PYPKG}-bottle ${PYPKG}-pexpect ${PYPKG}-tk
     else  # Debian/Ubuntu
         pf=pyflakes
         # Starting around 20.04, installing pyflakes instead of pyflakes3
@@ -182,7 +182,7 @@ function mn_deps {
         $install gcc make socat psmisc xterm ssh iperf telnet \
                  ethtool help2man $pf pylint pep8 \
                  net-tools \
-                 ${PYPKG}-pexpect ${PYPKG}-tk
+                 ${PYPKG}-bottle ${PYPKG}-pexpect ${PYPKG}-tk
         # Install pip
         $install ${PYPKG}-pip || $install ${PYPKG}-pip-whl
         if ! ${PYTHON} -m pip -V; then
