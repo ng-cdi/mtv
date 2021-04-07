@@ -98,6 +98,7 @@ from itertools import chain, groupby
 from math import ceil
 
 from mininet.cli import CLI
+from mininet.rest import REST
 from mininet.log import info, error, debug, output, warn
 from mininet.node import ( Node, Host, OVSKernelSwitch, DefaultController,
                            Controller )
@@ -120,7 +121,7 @@ class Mininet( object ):
                   build=True, xterms=False, cleanup=False, ipBase='10.0.0.0/8',
                   inNamespace=False,
                   autoSetMacs=False, autoStaticArp=False, autoPinCpus=False,
-                  listenPort=None, waitConnected=False ):
+                  listenPort=None, waitConnected=False, rest=False ):
         """Create Mininet object.
            topo: Topo (topology) object or None
            switch: default Switch class
@@ -161,6 +162,7 @@ class Mininet( object ):
         self.nextCore = 0  # next core for pinning hosts to CPUs
         self.listenPort = listenPort
         self.waitConn = waitConnected
+        self.rest = rest
 
         self.hosts = []
         self.switches = []
@@ -921,6 +923,8 @@ class Mininet( object ):
     def interact( self ):
         "Start network and run our simple CLI."
         self.start()
+        if self.rest:
+            api = REST( self )
         result = CLI( self )
         self.stop()
         return result
