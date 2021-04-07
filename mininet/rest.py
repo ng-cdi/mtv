@@ -16,11 +16,13 @@ curl ...
 should work correctly and allow host h2 to ping host h3
 """
 
+import codecs
 import threading
 import json
 import os.path
 
 from bottle import Bottle, HTTPResponse, request
+from subprocess import PIPE
 
 from mininet.log import info, output
 from mininet.log import error as mnerror
@@ -46,6 +48,7 @@ class REST(Bottle):
         if port > 65536 or port < 1:
             mnerror('given port value is not valid for the api\n')
             return
+        self.node_procs = {}
         thread = threading.Thread(
             target=self.run_server, args=(port,), daemon=True)
         thread.start()
@@ -58,10 +61,12 @@ class REST(Bottle):
         self.route(self.prefix+'/pingset', callback=self.__pingSet)
         self.route(self.prefix+'/pingall', callback=self.__pingAll)
         self.route(self.prefix+'/iperfpair', callback=self.__iperfPair)
-        self.route(self.prefix+'/node/<node_name>/cmd',
-                   method='POST', callback=self.__runCmd)
-        self.route(self.prefix+'/node/<node_name>/monitor',
-                   callback=self.__monitorNodeCmd)
+        self.route(self.prefix+'/node/<node_name>/process/create',
+                   method='POST', callback=self.__nodePOpen)
+        self.route(self.prefix+'/node/<node_name>/process/<pid>',
+                   callback=self.__nodePOpenMonitor)
+        self.route(self.prefix+'/node/<node_name>/process/<pid>/terminate',
+                   callback=self.__nodePOpenTerminate)
 
         try:
             self.run(host='0.0.0.0', port=port, quiet=True)
@@ -150,26 +155,62 @@ class REST(Bottle):
         }
         return self.__build_response(data)
 
-    def __runCmd(self, node_name):
+    def __nodePOpen(self, node_name):
         if not node_name in self.mn:
             data = {"error": "node does not exist"}
             return self.__build_response(data, code=400)
         node = self.mn.get(node_name)
-        body = request.json
-        commandStr = body.get("command", "")
-        node.sendCmd(commandStr)
-        data = {
-            "sent": "command has been sent to the node"
-        }
-        return self.__build_response(data)
+        try:
+            body = request.json
+        except:
+            data = {"error": "but have json content type"}
+            return self.__build_response(data, code=400)
+        if not body.get("command", None):
+            data = {"error": "a command must be provided in the json"}
+            return self.__build_response(data, code=400)
+        if not isinstance(body.get("command"), str):
+            data = {"error": "command must be a string"}
+            return self.__build_response(data, code=400)
+        try:
+            popen = node.popen(body.get("command"),
+                               stdin=PIPE, stdout=PIPE, stderr=PIPE)
+            self.node_procs.setdefault(node_name, {})
+            self.node_procs[node_name][str(popen.pid)] = popen
+            data = {
+                "success": ("created process pid:%s" % str(popen.pid))
+            }
+            return self.__build_response(data, code=200)
+        except:
+            data = {"error": "popen command failed"}
+            return self.__build_response(data, code=500)
 
-    def __monitorNodeCmd(self, node_name):
-        if not node_name in self.mn:
-            data = {"error": "node does not exist"}
+    def __nodePOpenMonitor(self, node_name, pid):
+        if not self.node_procs.get(node_name, {}).get(pid, None):
+            data = {"error": "process does not exist"}
             return self.__build_response(data, code=400)
-        node = self.mn.get(node_name)
-        output = node.monitor(timeoutms=2000)
-        data = {
-            "node_output": output
-        }
-        return self.__build_response(data)
+        proc = (self.node_procs[node_name][pid])
+        exit_code = proc.poll()
+        if not exit_code == None:
+            data = {
+                "status": "stopped",
+                "exit_code": exit_code,
+                "stdout": codecs.decode(proc.stdout.read()),
+                "stderr": codecs.decode(proc.stderr.read())
+            }
+            (self.node_procs[node_name]).pop(pid)
+        else:
+            data = {"status": "running"}
+        return self.__build_response(data, code=200)
+
+    def __nodePOpenTerminate(self, node_name, pid):
+        if not self.node_procs.get(node_name, {}).get(pid, None):
+            data = {"error": "process does not exist"}
+            return self.__build_response(data, code=400)
+        proc = (self.node_procs[node_name][pid])
+        exit_code = proc.poll()
+        if exit_code == None:
+            proc.terminate()
+            data = {"success": "process termination signal sent"}
+        else:
+            data = {"success": "process has already terminated"}
+        return self.__build_response(data, code=200)
