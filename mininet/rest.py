@@ -95,8 +95,8 @@ class REST(Bottle):
         data = {}
         for response in pingData:
             data[("%s-%s" % (response[0].name, response[1].name))] = {
-                "source": response[0].name,
-                "destination": response[1].name,
+                "sender": response[0].name,
+                "target": response[1].name,
                 "sent": response[2][0],
                 "received": response[2][1],
                 "rtt_avg": response[2][3]
@@ -150,6 +150,8 @@ class REST(Bottle):
             data = {"error": "iperf failed"}
             return self.__build_response(data, code=500)
         data = {
+            "server": hosts[1].name,
+            "client": hosts[0].name,
             "client_speed": results[1],
             "server_speed": results[0]
         }
@@ -192,6 +194,7 @@ class REST(Bottle):
         exit_code = proc.poll()
         if not exit_code == None:
             data = {
+                "node_name": node_name,
                 "status": "stopped",
                 "exit_code": exit_code,
                 "stdout": codecs.decode(proc.stdout.read()),
@@ -199,7 +202,7 @@ class REST(Bottle):
             }
             (self.node_procs[node_name]).pop(pid)
         else:
-            data = {"status": "running"}
+            data = {"node_name": node_name, "status": "running"}
         return self.__build_response(data, code=200)
 
     def __nodePOpenTerminate(self, node_name, pid):
