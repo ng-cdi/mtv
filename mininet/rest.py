@@ -37,14 +37,16 @@ from mininet.log import error as mnerror
 class REST(Bottle):
     "Simple REST API to talk to nodes."
 
-    prefix = '/mn/api'
-
     def __init__(self, mininet, port=8080, **kwargs):
         """Start and run interactive REST API
            mininet: Mininet network object
            port: port to expose the API"""
         super(REST, self).__init__()
         self.mn = mininet
+        self.prefix = kwargs.get("prefix", "/mn/api")
+        if not self.prefix.startswith('/'):
+            mnerror('the api prefix must start with a /\n')
+            return
         if port > 65536 or port < 1:
             mnerror('given port value is not valid for the api\n')
             return
@@ -137,21 +139,40 @@ class REST(Bottle):
         return self.__returnPingData(results)
 
     def __iperfPair(self):
-        hosts, error = self.__getHostSet(request.query.hosts)
-        if not hosts:
-            data = {"error": error}
+        if str(request.query.get("server", None)) in self.mn:
+            server = self.mn.get(str(request.query.server))
+        else:
+            data = {"error": "server not a valid host"}
             return self.__build_response(data, code=400)
-        if len(hosts) > 2:
-            data = {"error": "iperf only supports a set of 2 hosts"}
+        if str(request.query.get("client", None)) in self.mn:
+            client = self.mn.get(str(request.query.client))
+        else:
+            data = {"error": "client not a valid host"}
+            return self.__build_response(data, code=400)
+        type_ = str(request.query.get("type", "TCP")).upper()
+        if not type_ in ["UDP", "TCP"]:
+            data = {"error": "type must be TCP or UDP"}
+            return self.__build_response(data, code=400)
+        time = request.query.get("time", 5)
+        try:
+            time = int(time)
+        except:
+            data = {"error": "time should be a number"}
+            return self.__build_response(data, code=400)
+        if time <= 0 or time >= 31:
+            data = {"error": "time should be between 1 and 30"}
             return self.__build_response(data, code=400)
         try:
-            results = self.mn.iperf(hosts=hosts)
+            results = self.mn.iperf(
+                hosts=[client, server], seconds=time, fmt='m', l4Type=type_)
         except:
             data = {"error": "iperf failed"}
             return self.__build_response(data, code=500)
         data = {
-            "server": hosts[1].name,
-            "client": hosts[0].name,
+            "server": server.name,
+            "client": client.name,
+            "traffic type": type_,
+            "seconds": time,
             "client_speed": results[1],
             "server_speed": results[0]
         }
