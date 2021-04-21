@@ -62,8 +62,9 @@ class REST(Bottle):
         self.route(self.prefix+'/stop', callback=self.__stop)
         self.route(self.prefix+'/pingset', callback=self.__pingSet)
         self.route(self.prefix+'/pingall', callback=self.__pingAll)
-        # Create a new command
+
         self.route(self.prefix+'/iperfpair', callback=self.__iperfPair)
+        # Create a new command
         self.route(self.prefix+'/node/<node_name>/process/create',
                    method='POST', callback=self.__nodeCmd)
         # Get command list
@@ -121,7 +122,23 @@ class REST(Bottle):
 
     def __getNodes(self):
         """Get a list of nodes that exist within a topo"""
-        data = {"nodes": [node for node in self.mn]}
+        full = request.query.get("full", False)
+        try:
+            full = bool(full)
+        except:
+            data = {"error": "full should be true/false"}
+            return self.__build_response(data, code=400)
+        if not full:
+            data = {"nodes": [node for node in self.mn]}
+        else:
+            data = {
+                "nodes": [
+                    {
+                        "name": self.mn.get(n).name,
+                        "class": self.mn.get(n).__class__.__name__
+                    } for n in self.mn
+                ]
+            }
         return self.__build_response(data)
 
     def __getNode(self, node_name):
@@ -181,7 +198,7 @@ class REST(Bottle):
         data = {
             "server": server.name,
             "client": client.name,
-            "traffic type": type_,
+            "traffic_type": type_,
             "seconds": time,
             "client_speed": results[1],
             "server_speed": results[0]
@@ -219,7 +236,8 @@ class REST(Bottle):
                 }
             )
             data = {
-                "success": ("created process pid:%s" % str(popen.pid))
+                "success": "created process pid",
+                "pid": popen.pid
             }
             return self.__build_response(data, code=200)
         except:
@@ -231,6 +249,7 @@ class REST(Bottle):
             procs = {
                 "processes": [{
                     "pid": p.get("pid", 0),
+                    "state": ("running" if p.get("process").poll() == None else "stopped"),
                     "command": p.get("command", "nil")
                 } for p in self.node_procs.get(node_name)]
             }
@@ -253,9 +272,9 @@ class REST(Bottle):
                 except:
                     mnerror('Attempted to read streams of non-terminated process\n')
                 data = {
-                    "node_name": node_name,
-                    "state": ("stopped" if proc["exit_code"] else "running"),
-                    "exit_code": proc["exit_code"],
+                    "pid": popen.pid,
+                    "state": ("running" if proc.get("process").poll() == None else "stopped"),
+                    "exit_code": proc.get("process").poll(),
                     "stdout": proc["stdout"],
                     "stderr": proc["stderr"],
                     "command": proc.get("command")
