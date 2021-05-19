@@ -1,0 +1,14 @@
+FROM debian:stretch-slim as builder
+
+RUN apt-get update -q
+RUN apt-get install -yq gcc
+
+ARG VERSION="(latest)"
+
+WORKDIR /build
+COPY mnexec.c .
+RUN gcc -Wall -Wextra -DVERSION=\"${VERSION}\" mnexec.c -o mnexec
+
+FROM scratch
+
+COPY --from=builder /build/mnexec /build/mnexec
