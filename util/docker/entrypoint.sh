@@ -24,7 +24,7 @@ function file_exists {
 if [ ! -z ${CLEAN+x} ]; then
   if [ "y" == "${CLEAN}" ]; then
     becho "*** Running MN clean..."
-    sudo mn -c > /dev/null 2>&1
+    mn -c > /dev/null 2>&1
     becho "*** MN clean complete ✅"
   fi
 fi
@@ -34,9 +34,9 @@ if [ ! -z ${SCRIPT+x} ]; then
   file_exists $SCRIPT
   becho "*** Running mininet via the Python API..."
   echo "*** Ignoring any command line flags"
-  sudo python3 $SCRIPT && clean_exit 0
+  python3 $SCRIPT && clean_exit 0
 fi
 
 # Run MN with MN_FLAGS
 becho "*** Running mininet using mn - flags: '$@'"
-sudo mn $@ && clean_exit 0
+mn $@ && clean_exit 0
