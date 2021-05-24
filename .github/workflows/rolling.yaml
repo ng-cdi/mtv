@@ -1,5 +1,4 @@
-name: Rolling Release
-
+name: rolling-release
 on:
   push:
     branches: [master, main]

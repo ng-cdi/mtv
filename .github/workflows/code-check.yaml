@@ -1,4 +1,3 @@
-
 name: code-check
 
 on: [push, pull_request]
@@ -19,4 +18,4 @@ jobs:
           PYTHON=`which python` util/install.sh -n
           python -m pip install pylint==2.4.4
       - name: Run code check
-        run:  make codecheck
+        run: make codecheck
