@@ -1,138 +1,25 @@
-Mininet: Rapid Prototyping for Software Defined Networks
+`MTV`: Mininet Testbed for Virtualized Network Functions
 ========================================================
-*The best way to emulate almost any network on your laptop!*
 
-Mininet 2.3.0
-
-[![Build Status][1]](https://github.com/mininet/mininet/actions)
+A mininet fork designed to aide in the emulation of heterogenous VNF-based networks
 
 
-### What is Mininet?
+## What is mininet?
 
-Mininet emulates a complete network of hosts, links, and switches
-on a single machine.  To create a sample two-host, one-switch network,
-just run:
+Mininet is a popular python-based network emulation tool. As this fork goes somewhat against the direction planned for Mininet, this fork my behave unlike the upstream tool. However, if you want to know more about Mininet, check out the [upstream readme](https://github.com/mininet/mininet/blob/master/README.md).
 
-  `sudo mn`
+## What does the fork do?
 
-Mininet is useful for interactive development, testing, and demos,
-especially those using OpenFlow and SDN.  OpenFlow-based network
-controllers prototyped in Mininet can usually be transferred to
-hardware with minimal changes for full line-rate execution.
+To reduce both the extensive human involvement in deploying critical network functions and the risk involved in automating that deployment, this tools is deigned to check VNFs for non-performance related bugs pre-deployment as part of a CI/CD workflow.
 
-### How does it work?
+### Key Changes
 
-Mininet creates virtual networks using process-based virtualization
-and network namespaces - features that are available in recent Linux
-kernels.  In Mininet, hosts are emulated as `bash` processes running in
-a network namespace, so any code that would normally run on a Linux
-server (like a web server or client program) should run just fine
-within a Mininet "Host".  The Mininet "Host" will have its own private
-network interface and can only see its own processes.  Switches in
-Mininet are software-based switches like Open vSwitch or the OpenFlow
-reference switch.  Links are virtual ethernet pairs, which live in the
-Linux kernel and connect our emulated switches to emulated hosts
-(processes).
+ - Integrated RESTful API for all topologies (`--rest` flag in `mn`)
+ - Add LibVirt nodes into a topology
 
-### Features
+## Usage
 
-Mininet includes:
-
-* A command-line launcher (`mn`) to instantiate networks.
-
-* A handy Python API for creating networks of varying sizes and
-  topologies.
-
-* Examples (in the `examples/` directory) to help you get started.
-
-* Full API documentation via Python `help()` docstrings, as well as
-  the ability to generate PDF/HTML documentation with `make doc`.
-
-* Parametrized topologies (`Topo` subclasses) using the Mininet
-  object.  For example, a tree network may be created with the
-  command:
-
-  `mn --topo tree,depth=2,fanout=3`
-
-* A command-line interface (`CLI` class) which provides useful
-  diagnostic commands (like `iperf` and `ping`), as well as the
-  ability to run a command to a node. For example,
-
-  `mininet> h11 ifconfig -a`
-
-  tells host h11 to run the command `ifconfig -a`
-
-* A "cleanup" command to get rid of junk (interfaces, processes, files
-  in /tmp, etc.) which might be left around by Mininet or Linux. Try
-  this if things stop working!
-
-  `mn -c`
-
-### Python 3 Support
-
-- Mininet 2.3.0 supports Python 3 and Python 2!
-
-- You can install both the Python 3 and Python 2 versions of
-Mininet side by side, but the most recent installation will
-determine which Python version is used by default by `mn`.
-
-- You can run `mn` directly with Python 2 or Python 3,
-  as long as the appropriate version of Mininet is installed,
-  e.g.
-
-      $ sudo python2 `which mn`
-
-- More information regarding Python 3 and Python 2 support
-  may be found in the release notes on http://docs.mininet.org.
-
-### Other Enhancements and Information
-
-- Support for Ubuntu 20.04 LTS (and 18.04 and 16.04)
-
-- More reliable testing and CI via github actions
-
-- Additional information about this release and previous releases
-  may be found in the release notes on http://docs.mininet.org.
-
-### Installation
-
-See `INSTALL` for installation instructions and details.
-
-### Documentation
-
-In addition to the API documentation (`make doc`), much useful
-information, including a Mininet walkthrough and an introduction
-to the Python API, is available on the
-[Mininet Web Site](http://mininet.org).
-There is also a wiki which you are encouraged to read and to
-contribute to, particularly the Frequently Asked Questions
-(FAQ) at http://faq.mininet.org.
-
-### Support
-
-Mininet is community-supported. We encourage you to join the
-Mininet mailing list, `mininet-discuss` at:
-
-<https://mailman.stanford.edu/mailman/listinfo/mininet-discuss>
-
-### Join Us
-
-Thanks again to all of the Mininet contributors and users!
-
-Mininet is an open source project and is currently hosted
-at <https://github.com/mininet>.  You are encouraged to download
-the code, examine it, modify it, and submit bug reports, bug fixes,
-feature requests, new features and other issues and pull requests.
-Thanks to everyone who has contributed code to the Mininet project
-(see CONTRIBUTORS for more info!) It is because of everyone's
-hard work that Mininet continues to grow and improve.
-
-### Enjoy Mininet
-
-Have fun! We look forward to seeing what you will do with Mininet
-to change the networking world.
-
-Bob Lantz,
-on behalf of the Mininet Contributors
-
-[1]: https://github.com/mininet/mininet/workflows/mininet-tests/badge.svg
+The best way to get started with `MTV` is via Docker. To get a topology going with a rest api, just run:
+```bash
+docker run --rm -it --privileged ghcr.io/ng-cdi/mininet:latest "--rest --switch ovsk"
+```
