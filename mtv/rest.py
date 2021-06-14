@@ -24,8 +24,8 @@ import os.path
 from bottle import Bottle, HTTPResponse, request
 from subprocess import PIPE
 
-from mininet.log import info, output
-from mininet.log import error as mnerror
+from mtv.log import info, output
+from mtv.log import error as mnerror
 
 # TODO: Add common error handlers
 # TODO: Graceful exit
@@ -37,12 +37,12 @@ from mininet.log import error as mnerror
 class REST(Bottle):
     "Simple REST API to talk to nodes."
 
-    def __init__(self, mininet, port=8080, **kwargs):
+    def __init__(self, mtv, port=8080, **kwargs):
         """Start and run interactive REST API
-           mininet: Mininet network object
+           mtv: Mininet network object
            port: port to expose the API"""
         super(REST, self).__init__()
-        self.mn = mininet
+        self.mn = mtv
         self.prefix = kwargs.get("prefix", "/mn/api")
         if not self.prefix.startswith('/'):
             mnerror('the api prefix must start with a /\n')

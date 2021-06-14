@@ -26,10 +26,9 @@ RUN apt-get update -q && \
 
 COPY --from=openflow /usr/local/bin/ /usr/local/bin/
 COPY --from=mnexec /build/mnexec /usr/bin/mnexec
-WORKDIR /mininet
+WORKDIR /mtv
 COPY setup.py .
-COPY mininet/ mininet/
-COPY examples/ mininet/examples/
+COPY mtv/ mtv/
 COPY bin/ bin/
 
 RUN pip3 install .
