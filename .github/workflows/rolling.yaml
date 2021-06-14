@@ -99,7 +99,7 @@ jobs:
           file: util/docker/Dockerfile
           platforms: linux/amd64,linux/386,linux/arm64/v8
           push: true
-          tags: ghcr.io/${{ steps.extract_owner.outputs.owner }}/mininet:latest
+          tags: ghcr.io/${{ steps.extract_owner.outputs.owner }}/mtv:latest
           no-cache: false
           labels: |
             org.opencontainers.image.title=${{ github.event.repository.name }}

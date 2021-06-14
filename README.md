@@ -21,5 +21,5 @@ To reduce both the extensive human involvement in deploying critical network fun
 
 The best way to get started with `MTV` is via Docker. To get a topology going with a rest api, just run:
 ```bash
-docker run --rm -it --privileged ghcr.io/ng-cdi/mininet:latest "--rest --switch ovsk"
+docker run --rm -it --privileged ghcr.io/ng-cdi/mtv:latest "--rest --switch ovsk"
 ```
