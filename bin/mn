@@ -85,7 +85,6 @@ LINKS = {'default': Link,  # Note: overridden below
 CLI = None  # Set below if needed
 REST = None
 
-
 def addDictOption(opts, choicesDict, default, name, **kwargs):
     """Convenience function to add choices dicts to OptionParser.
        opts: OptionParser instance

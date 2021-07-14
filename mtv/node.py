@@ -53,14 +53,16 @@ Future enhancements:
 """
 
 import os
+import sys
 import pty
 import re
 import signal
 import select
+import libvirt
+import subprocess
+import xml.etree.ElementTree as ET
 from distutils.version import StrictVersion
-from re import findall
 from subprocess import Popen, PIPE
-from sys import exit  # pylint: disable=redefined-builtin
 from time import sleep
 
 from mtv.log import info, error, warn, debug
@@ -1105,17 +1107,17 @@ class OVSSwitch(Switch):
         #  moduleDeps( subtract=OF_KMOD, add=OVS_KMOD )
         out, err, exitcode = errRun('ovs-vsctl -t 1 show')
         if exitcode:
-            error(out + err +
-                  'ovs-vsctl exited with code %d\n' % exitcode +
-                  '*** Error connecting to ovs-db with ovs-vsctl\n'
-                  'Make sure that Open vSwitch is installed, '
-                  'that ovsdb-server is running, and that\n'
-                  '"ovs-vsctl show" works correctly.\n'
-                  'You may wish to try '
-                  '"service openvswitch-switch start".\n')
-            exit(1)
-        version = quietRun('ovs-vsctl --version')
-        cls.OVSVersion = findall(r'\d+\.\d+', version)[0]
+            error( out + err +
+                   'ovs-vsctl exited with code %d\n' % exitcode +
+                   '*** Error connecting to ovs-db with ovs-vsctl\n'
+                   'Make sure that Open vSwitch is installed, '
+                   'that ovsdb-server is running, and that\n'
+                   '"ovs-vsctl show" works correctly.\n'
+                   'You may wish to try '
+                   '"service openvswitch-switch start".\n' )
+            exit( 1 )
+        version = quietRun( 'ovs-vsctl --version' )
+        cls.OVSVersion = re.findall( r'\d+\.\d+', version )[ 0 ]
 
     @classmethod
     def isOldOVS(cls):
@@ -1536,8 +1538,8 @@ class Ryu(Controller):
 class RemoteController(Controller):
     "Controller running outside of Mininet's control."
 
-    def __init__(self, name, ip='127.0.0.1',
-                 port=None, **kwargs):
+    def __init__( self, name, ip='127.0.0.1',
+                  port=None, **kwargs ):
         """Init.
            name: name to give controller
            ip: the IP address where the remote controller is
@@ -1604,3 +1606,190 @@ def DefaultController(name, controllers=DefaultControllers, **kwargs):
 def NullController(*_args, **_kwargs):
     "Nonexistent controller - simply returns None"
     return None
+
+
+class VNode( object ):
+    """ A vNode (Virtualized Node) is a Virtual Machine, connected to 
+    mininet via an OpenVSwitch bridge. """
+
+    def __init__( self, name, domTree, **kwargs ):
+        self.name = name
+        self.domID = None
+        self.hyperv = self.getHypervisor( domTree )
+        self.mac = kwargs.get( 'mac' )
+        self.switches = kwargs.get( 'switches' )
+        self.containerID = kwargs.get( 'containerID' )
+        self.dockerswitches = kwargs.get( 'dockerswitches' )
+        if self.containerID is not None:
+            self.rename( domTree, self.containerID )
+        if self.dockerswitches is not None:
+            for i in self.dockerswitches:
+                self.insertInterface( domTree, mac_addr=self.mac, switch=i )
+        else:
+            for i in self.switches:
+                self.insertInterface( domTree, mac_addr=self.mac, switch=i )
+
+        self.XML = ET.tostring( domTree.getroot(), encoding="utf-8", method="xml").decode("utf8")
+        self.hasStarted = False
+
+    def start( self ):
+        conn = self.getLibvirtConn()
+        dom = conn.createXML( self.XML, 0 )
+        "Start the VM using libvirt api"
+        if dom == None and dom.ID() != -1:
+            return None
+        else:
+            self.domID = dom.ID()
+            self.hasStarted = True        
+            if self.dockerswitches is not None:
+                self.attachVethHost()
+
+    def terminate( self ):
+        "Terminate the VM using libvirt api"
+        conn = self.getLibvirtConn()
+        dom = conn.lookupByID( self.domID )
+        if dom != None:
+            dom.destroy()
+        else:
+            debug( "Unable to find VM: {}".format( self.name ) )
+        conn.close()
+
+    def getHypervisor( self, domTree ):
+        "Return hypervisor name: kvm or xen"
+        root = domTree.getroot()
+        hypervisor = root.get( 'type' )
+        if hypervisor.upper() == 'XEN':
+            return 'xen'
+        elif hypervisor.upper() == 'KVM':
+            return 'kvm'
+        return None
+
+    def rename( self, domTree, containerID ):
+        root = domTree.getroot()
+        name = root.find( 'name' )
+        name.text= 'mtv-' + containerID + '-' + self.name
+
+    def insertInterface( self, domTree, switch, mac_addr=None, docker_prefix=None ):
+        root = domTree.getroot()
+        devices = root.find( 'devices' )
+        l = ET.SubElement( devices, 'interface' )
+        l.set( 'type', 'bridge' )
+        source = ET.SubElement( l, 'source' )
+        source.set( 'bridge', switch )
+        #target = ET.SubElement( l, 'target' )
+        #target.set( 'dev', self.name )
+        virtualport = ET.SubElement( l, 'virtualport' )
+        virtualport.set( 'type', 'openvswitch' )
+        if mac_addr is not None:
+            mac = ET.SubElement( l, 'mac' )
+            mac.set( 'address', str( mac_addr ) )
+        ET.dump(domTree.getroot())
+
+    def _is_machine_running( self ):
+        "Returns machine state using libvirt api"
+        conn = self.getLibvirtConn()
+        if conn == None:
+            print( 'Failed to open connection to libvirtd' )
+        else:
+            dom = conn.lookupByID( self.domID )
+            flag = dom.isActive()
+            if dom == None:
+                print( 'Failed to find domain' )
+            else:
+                if flag == True:
+                    print( 'The domain is active' )
+                else:
+                    print( 'The domain is not active')
+        conn.close()
+
+    def getLibvirtConn( self ):
+        "Return connection to hypervisor with libvirt api"
+        hyperv = self.hyperv
+        if self.hyperv == None:
+            print('Error: Hypervisor info was not extracted')
+            return False
+        try:
+            if hyperv == 'kvm':
+                hyperv = 'qemu'
+            conn = libvirt.open( '{}+unix:///'.format( hyperv ) )
+            return conn
+        except:
+            print( 'Failed to acquire connection to hypervisor' )
+            sys.exit(1)
+
+    def attachVethHost( self ):
+        for i in self.switches:
+            vethname = i + "." + self.name
+            disappointment = subprocess.run(['ovs-vsctl', 'add-port', i, vethname], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+
+class DHCPNode( Node ):
+
+    def __init__( self, mac, ipaddr, ipnet, switch, **params ):
+        """
+        """
+        self.iprange = str(ipnet[2])+','+str(ipnet[-2])
+        self.mac = mac
+        self.ipaddr = ipaddr
+        self.switch = switch
+        self.netmask = str(ipnet.netmask)
+        self.defaults = {
+            'leasetime': '1h',
+            'conffile': '/etc/mtv/dnsconf',
+            'hostsfile': '/etc/mtv/hosts',
+            'leasefile': '/etc/mtv/leases',
+            'switchname': 's1'
+        }
+        self.defaults.update( params )
+        nodeopts = {
+            'ip': ipaddr,
+            'mac': mac
+        }
+        Node.__init__( self, name='dnsmasq', **nodeopts )
+        self.dnsmasqPopen = None
+        self.dhcptable = {}
+
+        #Conffile Configuration
+        if os.path.exists( self.defaults[ 'conffile' ] ):
+            os.remove( self.defaults[ 'conffile' ] )
+        f = open( self.defaults[ 'conffile' ], 'a+' )
+        f.close()
+        
+
+    def start( self, **params ):
+        "Start dnsmasq instance inside namespace"
+        opts = [ 'dnsmasq' ]
+        opts.append( '--port=0' )
+        opts.append( '--dhcp-range={},{}'.format( self.iprange, self.netmask ) )
+        opts.append( '--conf-file={}'.format( self.defaults[ 'conffile' ] ) )
+        opts.append( '--dhcp-leasefile={}'.format( self.defaults[ 'leasefile' ] ) )
+        self.dnsmasqPopen = self.popen( opts )
+        out, err = self.dnsmasqPopen.communicate()
+        debug(out)
+        exitcode = self.dnsmasqPopen.wait()
+
+    def update( self ):
+        if self.dnsmasqPopen != None:
+            self.dnsmasqPopen.kill()
+            self.start()
+
+    def addHost( self, mac, ip, expiry=1, hostname="*", clientID="*" ):
+        ipnocidr = ip.split('/')[0] 
+        with open( self.defaults[ 'conffile' ], 'r+' ) as hostsconf:
+            text = hostsconf.read()
+        with open( self.defaults[ 'conffile' ], 'a' ) as conf:
+            if not text.endswith( '\n' ):
+                conf.write( '\n' )
+            conf.write( 'dhcp-host={},{}'.format( mac, ipnocidr ) )
+        self.dhcptable[ self.name ] = {
+            'mac': mac,
+            'ip': ip
+        }
+        self.update()
+
+    def getIP( self, mac ):
+        with open( self.defaults[ 'leasefile' ], 'r+' ) as hostsconf:
+            for line in hostsconf:
+                if mac in line:
+                    return line.split(" ")[2]
+        return None

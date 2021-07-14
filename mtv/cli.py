@@ -36,7 +36,7 @@ import time
 import os
 import atexit
 
-from mtv.log import info, output, error
+from mtv.log import info, output, error, metric
 from mtv.term import makeTerms, runX11
 from mtv.util import (quietRun, dumpNodeConnections,
                       dumpPorts)
@@ -62,6 +62,7 @@ class CLI(Cmd):
         self.inputFile = script
         Cmd.__init__(self, stdin=stdin, **kwargs)
         info('*** Starting CLI:\n')
+        metric( "MTV DONE" )
 
         if self.inputFile:
             self.do_source(self.inputFile)

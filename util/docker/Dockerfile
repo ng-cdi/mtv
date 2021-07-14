@@ -21,6 +21,11 @@ RUN apt-get update -q && \
   python3-pip \
   python3-setuptools \
   telnet \
+  python-libvirt \
+  python3-libvirt \
+  virtinst \
+  libvirt-clients \
+  dnsmasq \
   traceroute && \
   rm -rf /var/lib/apt/lists/*
 
@@ -30,6 +35,7 @@ WORKDIR /mtv
 COPY setup.py .
 COPY mtv/ mtv/
 COPY bin/ bin/
+RUN mkdir -p /etc/mtv
 
 RUN pip3 install .
 

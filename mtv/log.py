@@ -1,7 +1,8 @@
 "Logging functions for Mininet."
 
-import logging
+import logging, time
 from logging import Logger
+from datetime import datetime
 import types
 
 
@@ -25,6 +26,9 @@ LOGLEVELDEFAULT = OUTPUT
 # default: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 LOGMSGFORMAT = '%(message)s'
 
+#File to store paper related metrics
+METRICFILE = '/etc/mtv/metrics'
+METRICS = True
 
 # Modified from python2.5/__init__.py
 class StreamHandlerNoNewline(logging.StreamHandler):
@@ -159,6 +163,14 @@ def makeListCompatible(fn):
     setattr(newfn, '__doc__', fn.__doc__)
     return newfn
 
+def metric( desc,  message="" ):
+    if METRICS != True:
+        return
+    with open(METRICFILE, 'a+') as f:
+        text = f.read()
+        if not text.endswith( '\n' ):
+            f.write( '\n' )
+        f.write( '{} - {}: {}\n'.format( datetime.now(), desc, message ) )
 
 # Initialize logger and logging functions
 

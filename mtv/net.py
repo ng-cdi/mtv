@@ -91,17 +91,20 @@ import re
 import select
 import signal
 import random
-
-from sys import exit  # pylint: disable=redefined-builtin
+import ipaddress
+import subprocess
+import _thread
+from subprocess import Popen
+from datetime import datetime
+import xml.etree.ElementTree as ET
 from time import sleep
 from itertools import chain, groupby
 from math import ceil
-
 from mtv.cli import CLI
 from mtv.rest import REST
-from mtv.log import info, error, debug, output, warn
+from mtv.log import info, error, debug, output, warn, metric
 from mtv.node import (Node, Host, OVSKernelSwitch, DefaultController,
-                      Controller)
+                      Controller, DHCPNode, VNode)
 from mtv.nodelib import NAT
 from mtv.link import Link, Intf
 from mtv.util import (quietRun, fixLimits, numCores, ensureRoot,
@@ -117,12 +120,12 @@ class Mininet(object):
     "Network emulation with hosts spawned in network namespaces."
 
     # pylint: disable=too-many-arguments
-    def __init__(self, topo=None, switch=OVSKernelSwitch, host=Host,
-                 controller=DefaultController, link=Link, intf=Intf,
-                 build=True, xterms=False, cleanup=False, ipBase='10.0.0.0/8',
-                 inNamespace=False,
-                 autoSetMacs=False, autoStaticArp=False, autoPinCpus=False,
-                 listenPort=None, waitConnected=False, rest=False):
+    def __init__( self, topo=None, switch=OVSKernelSwitch, host=Host,
+                  controller=DefaultController, link=Link, intf=Intf,
+                  build=True, xterms=False, cleanup=False, ipBase='10.0.0.0/8',
+                  inNamespace=False,
+                  autoSetMacs=False, autoStaticArp=False, autoPinCpus=False,
+                  listenPort=None, waitConnected=False, rest=False ):
         """Create Mininet object.
            topo: Topo (topology) object or None
            switch: default Switch class
@@ -148,6 +151,8 @@ class Mininet(object):
         self.controller = controller
         self.link = link
         self.intf = intf
+        self.ipNetwork = ipaddress.IPv4Network(ipBase)
+        self.ipNext = 2
         self.ipBase = ipBase
         self.ipBaseNum, self.prefixLen = netParse(self.ipBase)
         hostIP = (0xffffffff >> self.prefixLen) & self.ipBaseNum
@@ -180,7 +185,15 @@ class Mininet(object):
         if topo and build:
             self.build()
 
-    def waitConnected(self, timeout=None, delay=.5):
+    def getNextIP( self ):
+        if self.ipNext >= self.ipNetwork.num_addresses:
+            error("ip address limit exceeded")
+        next = str(self.ipNetwork[self.ipNext]) + "/" + str(self.ipNetwork.prefixlen)
+        self.ipNext += 1
+        return next
+
+
+    def waitConnected( self, timeout=None, delay=.5 ):
         """wait for each switch to connect to a controller
            timeout: time to wait, or None or True to wait indefinitely
            delay: seconds to sleep per iteration
@@ -219,17 +232,20 @@ class Mininet(object):
            params: parameters for host
            returns: added host"""
         # Default IP and MAC addresses
-        defaults = {'ip': ipAdd(self.nextIP,
-                                ipBaseNum=self.ipBaseNum,
-                                prefixLen=self.prefixLen) +
-                    '/%s' % self.prefixLen}
+        """
+        defaults = { 'ip': ipAdd( self.nextIP,
+                                  ipBaseNum=self.ipBaseNum,
+                                  prefixLen=self.prefixLen ) +
+                                  '/%s' % self.prefixLen }
+        """
+        defaults = { 'ip': self.getNextIP() }
         if self.autoSetMacs:
-            defaults['mac'] = macColonHex(self.nextIP)
+            defaults[ 'mac' ] = macColonHex( self.ipNext )
         if self.autoPinCpus:
-            defaults['cores'] = self.nextCore
-            self.nextCore = (self.nextCore + 1) % self.numCores
-        self.nextIP += 1
-        defaults.update(params)
+            defaults[ 'cores' ] = self.nextCore
+            self.nextCore = ( self.nextCore + 1 ) % self.numCores
+        #self.nextIP += 1
+        defaults.update( params )
         if not cls:
             cls = self.host
         h = cls(name, **defaults)
@@ -477,10 +493,11 @@ class Mininet(object):
                 else:
                     self.addController('c%d' % i, cls)
 
-        info('*** Adding hosts:\n')
-        for hostName in topo.hosts():
-            self.addHost(hostName, **topo.nodeInfo(hostName))
-            info(hostName + ' ')
+        info( '*** Adding hosts:\n' )
+        if topo.hosts() != None:
+            for hostName in topo.hosts():
+                self.addHost( hostName, **topo.nodeInfo( hostName ) )
+                info( hostName + ' ' )
 
         info('\n*** Adding switches:\n')
         for switchName in topo.switches():
@@ -925,8 +942,8 @@ class Mininet(object):
         "Start network and run our simple CLI."
         self.start()
         if self.rest:
-            api = REST(self)
-        result = CLI(self)
+            api = REST( self )
+        result = CLI( self )
         self.stop()
         return result
 
@@ -1005,9 +1022,148 @@ class MininetWithControlNet(Mininet):
             sleep(1)
         for switch in self.switches:
             while not sintf.isUp():
-                info('*** Waiting for', sintf, 'to come up\n')
-                sleep(1)
-            if self.ping(hosts=[switch, controller]) != 0:
-                error('*** Error: control network test failed\n')
-                exit(1)
-        info('\n')
+                info( '*** Waiting for', sintf, 'to come up\n' )
+                sleep( 1 )
+            if self.ping( hosts=[ switch, controller ] ) != 0:
+                error( '*** Error: control network test failed\n' )
+                exit( 1 )
+        info( '\n' )
+
+
+class Virtualnet( Mininet ):
+    """
+    A Mininet with Virtual Machine support (Libvirt)
+    and VM ip configuration with DHCP (dnsmasq)
+    self.vIPBase = '10.0.1.0/8'
+    #self.vIPBaseNum, self.vPrefixLen = self.netParse( self.vIPBase )
+    """
+    def __init__( self, metrics=False, docker=False, **params ):
+        Mininet.__init__( self, params )
+
+        #Enable DHCP if specified
+        self.metrics = metrics 
+        self.vnodes = []
+        self.dhcpnode = None
+        self.containerID = None
+        self.docker = docker
+        if docker == True:
+            self.containerID = self.getContainerID()
+            if self.containerID == None:
+                error("Could not obtain container ID")
+            debug("CONTAINER ID: {}".format(self.containerID))
+       
+    #Add Libvirt Node to Topology
+    def addVNode( self, name, domxml, **params ):
+        """Add a virtual node to the Mininet network
+           domxml: Path to libvirt xml file
+        """
+        start = datetime.now()
+        defaults = {
+            'mac': self.randMac(),
+            'ip' : None,
+            'dhcp': False,
+            'switches': None,
+            'containerID': self.containerID
+        }
+        defaults.update( params )
+
+        #Ensure incoming XML is valid.
+        if not os.path.exists( domxml ):
+            debug( "Path of DomXML file invalid" )
+        if self.validateXML( domxml ) == False:
+            return None
+        if defaults[ 'ip' ] is None:
+            defaults[ 'ip' ] = self.getNextIP()
+
+        domTree = ET.parse( domxml )
+
+        if self.dhcpnode is not None:
+            self.dhcpnode.addHost( defaults['mac'], defaults[ 'ip' ] )
+        
+        # Add Container Prefix to switch name if exits
+        if self.docker is True and defaults[ 'switches' ] is not None:
+            editedSwitches = []
+            for i in defaults[ 'switches' ]:
+                editedSwitches.append( self.containerID[0:6] + '-' + i + '-' + name )
+                defaults[ 'dockerswitches' ] = editedSwitches
+        v = VNode( name, domTree, **defaults )
+        self.vnodes.append( v )
+        self.nameToNode[ name ] = v
+        try:
+            _thread.start_new_thread( self.pollVNode, ( name, defaults[ 'mac' ] ) )
+        except:
+            debug( "Error: couldn't start thread" )
+        return v
+    
+    #Add Host to topology
+    def addHost( self, name, cls=None, **params ):
+        start = datetime.now()
+        mac = macColonHex( self.ipNext )
+        ip = self.getNextIP()
+        if self.dhcpnode != None:
+            self.dhcpnode.addHost( mac, ip)
+        h = Mininet.addHost( self, name, **{'ip': ip, 'mac': mac})
+        end = datetime.now()
+        metric( "Node {} \nTime: {}".format( name, end - start ) )
+        return h
+
+    def enableDHCP( self, switch, **params ):
+        name = "dnsmasq"
+        if self.dhcpnode is not None:
+            error( "DHCPNode already present!" )
+        ipaddr = str( self.ipNetwork[1] )
+        dhcpnode = DHCPNode( self.randMac(), ipaddr, self.ipNetwork, switch, **params )
+        self.dhcpnode = dhcpnode
+        self.hosts.append ( dhcpnode )
+        self.nameToNode[ name ] = dhcpnode
+        self.addLink( switch, dhcpnode )
+        return dhcpnode
+
+    def start( self ):
+        metric( "MTV INIT" )
+        Mininet.start( self )
+        if self.dhcpnode != None:
+            info( '*** Starting DHCP node\n' )
+            self.dhcpnode.start()
+        info( '*** Starting %s vnodes\n' % len( self.vnodes ) )
+        for vm in self.vnodes:
+            vm.start()
+    
+    def stop( self ):
+        "Terminate all running VMs in topology"
+        Mininet.stop( self )
+        info( '*** Stopping %i vnodes\n' % len( self.vnodes ) )
+        for vm in self.vnodes:
+            vm.terminate()
+
+    def validateXML( self, domxml ):
+        return True
+        result = Popen( [ 'virt-xml-validate', domxml ] ).wait()
+        if result == 0:
+            return True
+        else:
+            error( 'Error: XML File Invalid' )
+            return False
+ 
+    def getContainerID( self ):
+        cgroupFile = open("/proc/self/cgroup")
+        text = cgroupFile.read()
+        cgroupFile.close()
+        pattern = re.compile(r"docker\/[a-z0-9]{64}")
+        match = pattern.search(text)
+        return text[match.start()+7:match.end()] 
+
+    def pollVNode( self, name, mac ):
+        if self.dhcpnode == None:
+            debug( 'DHCPNODE NOT HERE' )
+            return False
+
+        max_tries = 1000
+        current_try = 0
+        while current_try < max_tries:
+            ip = self.dhcpnode.getIP( mac )
+            if ip is not None:
+                metric( 'VM UP: {}'.format( name ) )
+                return True
+        debug( "Timed out waiting for VNode DHCP Lease" )
+        return False

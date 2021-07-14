@@ -199,7 +199,8 @@ function mn_deps {
     fi
 
     echo "Installing Mininet core"
-    pushd $MININET_DIR/mininet
+    #pushd $MININET_DIR/mininet
+    pushd $MININET_DIR/mtv
     sudo PYTHON=${PYTHON} make install
     popd
 }
@@ -235,7 +236,7 @@ function of {
     cd $BUILD_DIR/openflow
 
     # Patch controller to handle more than 16 switches
-    patch -p1 < $MININET_DIR/mininet/util/openflow-patches/controller.patch
+    patch -p1 < $MININET_DIR/mtv/util/openflow-patches/controller.patch
 
     # Resume the install:
     ./boot.sh
@@ -303,7 +304,7 @@ function install_wireshark {
     # Copy coloring rules: OF is white-on-blue:
     echo "Optionally installing wireshark color filters"
     mkdir -p $HOME/.wireshark
-    cp -n $MININET_DIR/mininet/util/colorfilters $HOME/.wireshark
+    cp -n $MININET_DIR/mtv/util/colorfilters $HOME/.wireshark
 
     echo "Checking Wireshark version"
     WSVER=`wireshark -v | egrep -o '[0-9\.]+' | head -1`
@@ -557,9 +558,9 @@ function nox {
 
     # Apply patches
     git checkout -b tutorial-destiny
-    git am $MININET_DIR/mininet/util/nox-patches/*tutorial-port-nox-destiny*.patch
+    git am $MININET_DIR/mtv/util/nox-patches/*tutorial-port-nox-destiny*.patch
     if [ "$DIST" = "Ubuntu" ] && version_ge $RELEASE 12.04; then
-        git am $MININET_DIR/mininet/util/nox-patches/*nox-ubuntu12-hacks.patch
+        git am $MININET_DIR/mtv/util/nox-patches/*nox-ubuntu12-hacks.patch
     fi
 
     # Build
@@ -830,8 +831,37 @@ exit 0
 
 }
 
+function virtual_support {
+
+    if [ "$DIST" != "Ubuntu" ] && [ "$DIST" != "Debian" ]; then
+        echo "Virtual Support is only enabled for Debian and Ubuntu hosts at this time"
+        return
+    fi
+
+    VIRTENABLED="$(egrep '(vmx|svm)' /proc/cpuinfo 2>&1 > /dev/null)"
+
+    echo "Installing Virtual Host Support..."
+
+    if [ "$HYPERVISOR" = "xen" ] || [ "$HYPERVISOR" = "Xen" ]; then
+        echo "Installing Xen Hypervisor..."
+        $install xen-system
+    elif [ "$HYPERVISOR" = "kvm" ] || [ "$HYPERVISOR" = "KVM" ]; then
+        echo "Installing KVM Hypervisor..."
+    else
+        echo "Invalid parameter: '-z $HYPERVISOR'"
+        return
+    fi
+
+    if [ "$DIST" == "Debian" ]; then
+        $install python-libvirt python3-libvirt net-tools
+    fi
+        
+    $install libvirt-daemon-system qemu-system dnsmasq
+    
+}
+
 function usage {
-    printf '\nUsage: %s [-abcdfhikmnprtvVwxy03]\n\n' $(basename $0) >&2
+    printf '\nUsage: %s [-abcdfhikmnprtvVwxy03z]\n\n' $(basename $0) >&2
 
     printf 'This install script attempts to install useful packages\n' >&2
     printf 'for Mininet. It should (hopefully) work on Ubuntu 11.10+\n' >&2
@@ -862,6 +892,7 @@ function usage {
     printf -- ' -x: install NO(X) Classic OpenFlow controller\n' >&2
     printf -- ' -0: (default) -0[fx] installs OpenFlow 1.0 versions\n' >&2
     printf -- ' -3: -3[fx] installs OpenFlow 1.3 versions\n' >&2
+    printf -- ' -z: <hypervisor>: install a hypervisor to run virtualized nodes (Ubuntu/Debian)' >&2
     exit 2
 }
 
@@ -871,7 +902,7 @@ if [ $# -eq 0 ]
 then
     all
 else
-    while getopts 'abcdefhikmnprs:tvV:wxy03' OPTION
+    while getopts 'abcdefhikmnprs:tvV:wxy03z:' OPTION
     do
       case $OPTION in
       a)    all;;
@@ -905,6 +936,8 @@ else
             *)  echo "Invalid OpenFlow version $OF_VERSION";;
             esac;;
       y)    ryu;;
+      z)    HYPERVISOR=$OPTARG;
+            virtual_support;;
       0)    OF_VERSION=1.0;;
       3)    OF_VERSION=1.3;;
       ?)    usage;;
