@@ -238,7 +238,9 @@ class Mininet(object):
                                   prefixLen=self.prefixLen ) +
                                   '/%s' % self.prefixLen }
         """
-        defaults = { 'ip': self.getNextIP() }
+        defaults = {}
+        if params.get( 'ip' ) is None:
+            defaults[ 'ip' ] = self.getNextIP()
         if self.autoSetMacs:
             defaults[ 'mac' ] = macColonHex( self.ipNext )
         if self.autoPinCpus:
