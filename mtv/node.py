@@ -60,10 +60,13 @@ import signal
 import select
 import libvirt
 import subprocess
+import ipaddress
+import tempfile
 import xml.etree.ElementTree as ET
 from distutils.version import StrictVersion
 from subprocess import Popen, PIPE
 from time import sleep
+from itertools import count
 
 from mtv.log import info, error, warn, debug
 from mtv.util import (quietRun, errRun, errFail, moveIntf, isShellBuiltin,
@@ -667,12 +670,14 @@ class Node(object):
     @classmethod
     def checkSetup(cls):
         "Make sure our class and superclasses are set up"
-        clas = cls
-        while clas and not getattr(clas, 'isSetup', True):
-            clas.setup()
-            clas.isSetup = True
-            # Make pylint happy
-            clas = getattr(type(clas), '__base__', None)
+
+        # @simmsb: this never worked before, hopefully fixing it doesn't break things?
+        for klass in cls.mro():
+            if klass.__dict__.get("isSetup", False) or not issubclass(klass, Node):
+                continue
+
+            klass.setup()
+            klass.isSetup = True
 
     @classmethod
     def setup(cls):
@@ -970,6 +975,7 @@ class Switch(Node):
                            for i in self.intfList()]))
         return '<%s %s: %s pid=%s> ' % (
             self.__class__.__name__, self.name, intfs, self.pid)
+
 
 
 class UserSwitch(Switch):
@@ -1793,3 +1799,163 @@ class DHCPNode( Node ):
                 if mac in line:
                     return line.split(" ")[2]
         return None
+
+class DynamipsRouter(Switch):
+    """A router that runs an instance of dynamip.
+
+    This inhertits from :class:`Switch` so it requires having its interfaces
+    assigned IP addresses
+    """
+
+    def __init__(
+        self,
+        *args,
+        dynamips_platform,
+        dynamips_image,
+        dynamips_port_driver,
+        dynamips_args,
+        **kwargs,
+    ):
+        """
+        dynamips_platform: (str) The type of platform to emulate.
+        dynamips_image: (str) The file path of the Cisco IOS to use.
+        dynamips_port_driver: (tuple[str, str, int]) The port adapter / network
+            module driver to use, it's name when configuring, and how many ports it has.
+        dynamips_args: (list[str]) Parameters to pass to dynamips.
+        """
+
+        self.dynamips_platform = dynamips_platform
+        self.dynamips_image = dynamips_image
+        self.dynamips_port_driver_key = dynamips_port_driver[0]
+        self.dynamips_port_driver_conf_key = dynamips_port_driver[1]
+        self.dynamips_port_driver_ports = dynamips_port_driver[2]
+        self.dynamips_args = dynamips_args
+
+        # type: dict[tuple[int, int], str]
+        # map of (slot_idx, port_idx) -> tap device name
+        self.emu_port_taps = dict()
+
+        # type: dict[str, str]
+        # map of tap device name -> veth device name
+        # self.tap_veths = dict()
+
+        # type: dict[tuple[int, int], Intf]
+        # map of (slot_idx, port_idx) -> mininet interface
+        self.emu_port_intfs = dict()
+
+        # type: list[tuple[str, int]]
+        # the port drivers used, a list of pairs of the driver name and slot number
+        self.port_drivers = []
+
+        # type: list[str]
+        # The names of bridges used by this instance
+        self.bridges = []
+
+        # self.process = None
+
+        super().__init__(*args, **kwargs)
+
+    @staticmethod
+    def cmd_verbose(node, cmd):
+        node.cmd(cmd)
+        # r = node.cmd(cmd)
+        # print(f"({node}) {cmd}: {r}")
+
+    def start(self, controllers):
+        pg = self.port_gen()
+
+        for intf, port in self.ports.items():
+            if intf.name == "lo":
+                continue
+
+            emu_port = next(pg)
+
+            tap_name = f"tap-{self.name}-{port}"
+            bridge_name = f"br-{port}-{intf.name}"
+
+            self.cmd_verbose(intf, f"ip tuntap add mode tap {tap_name}")
+            self.cmd_verbose(intf, f"ip link set dev {tap_name} up")
+            self.cmd_verbose(intf, f"ip link add {bridge_name} type bridge")
+            self.cmd_verbose(intf, f"ip link set {tap_name} master {bridge_name}")
+            self.cmd_verbose(intf, f"ip link set {intf.name} master {bridge_name}")
+            self.cmd_verbose(intf, f"ip link set dev {bridge_name} up")
+
+            # self.tap_veths[tap_name] = intf.name
+            self.emu_port_intfs[emu_port] = intf
+            self.emu_port_taps[emu_port] = tap_name
+            self.bridges.append(bridge_name)
+
+        self.config_file = tempfile.NamedTemporaryFile(mode="w+")
+        self.config_file.write(self.make_config())
+        self.config_file.flush()
+
+        # print(self.config_file.name)
+
+        args = " ".join(self.dynamips_args)
+        port_drivers = " ".join(f"-p {n}:{name}" for name, n in self.port_drivers)
+        taps = " ".join(
+            f"-s {slot}:{port}:tap:{tap_name}"
+            for (slot, port), tap_name in self.emu_port_taps.items()
+        )
+        cmd = f"dynamips -C {self.config_file.name} -P {self.dynamips_platform} {args} {port_drivers} {taps} {self.dynamips_image}"
+        # print(cmd)
+
+        self.process = self.popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def make_config(self) -> str:
+        out = [
+            f"hostname {self.name}",
+            "ip routing",
+        ]
+
+        out.extend(["router rip", "version 2"])
+
+        for (slot, port), intf in self.emu_port_intfs.items():
+            if intf.ip is None or intf.prefixLen is None:
+                raise Exception(
+                    f"The interface {intf} of node {self} is lacking an assigned ip address."
+                )
+            net = ipaddress.ip_interface(f"{intf.ip}/{intf.prefixLen}")
+            out.append(f"network {net.network.network_address}")
+
+        for (slot, port), intf in self.emu_port_intfs.items():
+            (intf_mask, _) = ipaddress.IPv4Network._make_netmask(intf.prefixLen)
+            out.extend(
+                [
+                    f"interface {self.dynamips_port_driver_conf_key} {slot}/{port}",
+                    f"ip address {intf.ip} {intf_mask}",
+                    "no shut",
+                ]
+            )
+
+        out.append("end")
+
+        return "\n".join(out)
+
+    def port_gen(self):
+        """A generator that yields tuples of (slot_number, port_number) while
+        keeping track of how many port drivers have been used.
+        """
+        for pd_idx in count(1):
+            self.port_drivers.append((self.dynamips_port_driver_key, pd_idx))
+            for port_idx in range(self.dynamips_port_driver_ports):
+                yield (pd_idx, port_idx)
+
+    @classmethod
+    def setup(cls):
+        "Ensure any dependencies are loaded; if not, try to load them."
+        if not os.path.exists("/dev/net/tun"):
+            moduleDeps(add=TUN)
+
+    def stop(self, deleteIntfs=True):
+        print("bye")
+        self.process.kill()
+
+        if deleteIntfs:
+            for bridge_name in self.bridges:
+                self.cmd(f"ip link delete {bridge_name}")
+
+            for tap_name in self.emu_port_taps.values():
+                self.cmd(f"ip link delete {tap_name}")
+
+        return super().stop(deleteIntfs=deleteIntfs)
