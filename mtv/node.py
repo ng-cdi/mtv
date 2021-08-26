@@ -52,6 +52,7 @@ Future enhancements:
 - Create proxy objects for remote nodes (Mininet: Cluster Edition)
 """
 
+import io
 import os
 import sys
 import pty
@@ -1818,14 +1819,21 @@ class DynamipsRouter(Switch):
     ):
         """
         dynamips_platform: (str) The type of platform to emulate.
-        dynamips_image: (str) The file path of the Cisco IOS to use.
+        dynamips_image: (str | file like) The file path, or file of the Cisco IOS to use.
         dynamips_port_driver: (tuple[str, str, int]) The port adapter / network
             module driver to use, it's name when configuring, and how many ports it has.
         dynamips_args: (list[str]) Parameters to pass to dynamips.
         """
 
         self.dynamips_platform = dynamips_platform
-        self.dynamips_image = dynamips_image
+        try:
+            self.dynamips_image = self._process_image(dynamips_image)
+        except Exception as e:
+            raise Exception(
+                "We failed to process the provided dynamips image: {}".format(
+                    dynamips_image
+                )
+            ) from e
         self.dynamips_port_driver_key = dynamips_port_driver[0]
         self.dynamips_port_driver_conf_key = dynamips_port_driver[1]
         self.dynamips_port_driver_ports = dynamips_port_driver[2]
@@ -1856,11 +1864,34 @@ class DynamipsRouter(Switch):
 
         super().__init__(*args, **kwargs)
 
+    _mapped_images = {}
+    _tmp_image_files = []
+
+    @classmethod
+    def _process_image(cls, dynamips_image):
+        image = cls._mapped_images.get(dynamips_image)
+        if image is not None:
+            return image
+
+        if isinstance(dynamips_image, io.BufferedIOBase):
+            tmp_file = tempfile.NamedTemporaryFile()
+            dynamips_image.seek(0)
+            shutil.copyfileobj(dynamips_image, tmp_file)
+
+            cls._mapped_images[dynamips_image] = tmp_file.name
+            cls._tmp_image_files.append(tmp_file)
+
+            return tmp_file.name
+
+        # assume file name/ path
+        with open(dynamips_image) as _:
+            # just checking it exists
+            cls._mapped_images[dynamips_image] = dynamips_image
+            return dynamips_image
+
     @staticmethod
     def cmd_verbose(node, cmd):
         node.cmd(cmd)
-        # r = node.cmd(cmd)
-        # print(f"({node}) {cmd}: {r}")
 
     def start(self, controllers):
         pg = self.port_gen()
