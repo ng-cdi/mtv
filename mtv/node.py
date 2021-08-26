@@ -1851,6 +1851,7 @@ class DynamipsRouter(Switch):
         # The names of bridges used by this instance
         self.bridges = []
 
+        self._output_file = tempfile.NamedTemporaryFile()
         # self.process = None
 
         super().__init__(*args, **kwargs)
@@ -1880,6 +1881,9 @@ class DynamipsRouter(Switch):
             self.cmd_verbose(intf, f"ip link set {intf.name} master {bridge_name}")
             self.cmd_verbose(intf, f"ip link set dev {bridge_name} up")
 
+            # sometimes iptables likes to hurt us
+            self.cmd_verbose(intf, f"iptables -I FORWARD -p all -i {bridge_name} -j ACCEPT")
+
             # self.tap_veths[tap_name] = intf.name
             self.emu_port_intfs[emu_port] = intf
             self.emu_port_taps[emu_port] = tap_name
@@ -1900,7 +1904,16 @@ class DynamipsRouter(Switch):
         cmd = f"dynamips -C {self.config_file.name} -P {self.dynamips_platform} {args} {port_drivers} {taps} {self.dynamips_image}"
         # print(cmd)
 
-        self.process = self.popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.process = self.popen(cmd, mncmd=[], stdin=self._output_file, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def connected(self):
+        with open(self._output_file.name) as f:
+            for line in f:
+                # this seems like a bit of a hack. but the router is likely ready
+                # as soon as it prints the welcome message.
+                if "Press RETURN to get started" in line:
+                    return True
+        return False
 
     def make_config(self) -> str:
         out = [

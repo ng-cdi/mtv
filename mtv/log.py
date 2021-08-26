@@ -4,6 +4,7 @@ import logging, time
 from logging import Logger
 from datetime import datetime
 import types
+from pathlib import Path
 
 
 # Create a new loglevel, 'CLI info', which enables a Mininet user to see only
@@ -166,6 +167,7 @@ def makeListCompatible(fn):
 def metric( desc,  message="" ):
     if METRICS != True:
         return
+    Path(METRICFILE).parent.mkdir(parents=True, exist_ok=True)
     with open(METRICFILE, 'a+') as f:
         text = f.read()
         if not text.endswith( '\n' ):
