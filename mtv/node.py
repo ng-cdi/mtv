@@ -1871,18 +1871,24 @@ class DynamipsRouter(Switch):
 
             emu_port = next(pg)
 
-            tap_name = f"tap-{self.name}-{port}"
-            bridge_name = f"br-{port}-{intf.name}"
+            tap_name = "tap-{}-{}".format(self.name, port)
+            bridge_name = "br-{}-{}".format(port, intf.name)
 
-            self.cmd_verbose(intf, f"ip tuntap add mode tap {tap_name}")
-            self.cmd_verbose(intf, f"ip link set dev {tap_name} up")
-            self.cmd_verbose(intf, f"ip link add {bridge_name} type bridge")
-            self.cmd_verbose(intf, f"ip link set {tap_name} master {bridge_name}")
-            self.cmd_verbose(intf, f"ip link set {intf.name} master {bridge_name}")
-            self.cmd_verbose(intf, f"ip link set dev {bridge_name} up")
+            self.cmd_verbose(intf, "ip tuntap add mode tap {}".format(tap_name))
+            self.cmd_verbose(intf, "ip link set dev {} up".format(tap_name))
+            self.cmd_verbose(intf, "ip link add {} type bridge".format(bridge_name))
+            self.cmd_verbose(
+                intf, "ip link set {} master {}".format(tap_name, bridge_name)
+            )
+            self.cmd_verbose(
+                intf, "ip link set {} master {}".format(intf.name, bridge_name)
+            )
+            self.cmd_verbose(intf, "ip link set dev {} up".format(bridge_name))
 
             # sometimes iptables likes to hurt us
-            self.cmd_verbose(intf, f"iptables -I FORWARD -p all -i {bridge_name} -j ACCEPT")
+            self.cmd_verbose(
+                intf, "iptables -I FORWARD -p all -i {} -j ACCEPT".format(bridge_name)
+            )
 
             # self.tap_veths[tap_name] = intf.name
             self.emu_port_intfs[emu_port] = intf
@@ -1896,15 +1902,30 @@ class DynamipsRouter(Switch):
         # print(self.config_file.name)
 
         args = " ".join(self.dynamips_args)
-        port_drivers = " ".join(f"-p {n}:{name}" for name, n in self.port_drivers)
+        port_drivers = " ".join(
+            "-p {}:{}".format(n, name) for name, n in self.port_drivers
+        )
         taps = " ".join(
-            f"-s {slot}:{port}:tap:{tap_name}"
+            "-s {}:{}:tap:{}".format(slot, port, tap_name)
             for (slot, port), tap_name in self.emu_port_taps.items()
         )
-        cmd = f"dynamips -C {self.config_file.name} -P {self.dynamips_platform} {args} {port_drivers} {taps} {self.dynamips_image}"
+        cmd = "dynamips -C {} -P {} {} {} {} {}".format(
+            self.config_file.name,
+            self.dynamips_platform,
+            args,
+            port_drivers,
+            taps,
+            self.dynamips_image,
+        )
         # print(cmd)
 
-        self.process = self.popen(cmd, mncmd=[], stdin=self._output_file, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.process = self.popen(
+            cmd,
+            mncmd=[],
+            stdin=self._output_file,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
     def connected(self):
         with open(self._output_file.name) as f:
@@ -1917,7 +1938,7 @@ class DynamipsRouter(Switch):
 
     def make_config(self) -> str:
         out = [
-            f"hostname {self.name}",
+            "hostname {}".format(self.name),
             "ip routing",
         ]
 
@@ -1926,17 +1947,21 @@ class DynamipsRouter(Switch):
         for (slot, port), intf in self.emu_port_intfs.items():
             if intf.ip is None or intf.prefixLen is None:
                 raise Exception(
-                    f"The interface {intf} of node {self} is lacking an assigned ip address."
+                    "The interface {} of node {} is lacking an assigned ip address.".format(
+                        intf, self
+                    )
                 )
-            net = ipaddress.ip_interface(f"{intf.ip}/{intf.prefixLen}")
-            out.append(f"network {net.network.network_address}")
+            net = ipaddress.ip_interface("{}/{}".format(intf.ip, intf.prefixLen))
+            out.append("network {}".format(net.network.network_address))
 
         for (slot, port), intf in self.emu_port_intfs.items():
             (intf_mask, _) = ipaddress.IPv4Network._make_netmask(intf.prefixLen)
             out.extend(
                 [
-                    f"interface {self.dynamips_port_driver_conf_key} {slot}/{port}",
-                    f"ip address {intf.ip} {intf_mask}",
+                    "interface {} {}/{}".format(
+                        self.dynamips_port_driver_conf_key, slot, port
+                    ),
+                    "ip address {} {}".format(intf.ip, intf_mask),
                     "no shut",
                 ]
             )
@@ -1966,9 +1991,9 @@ class DynamipsRouter(Switch):
 
         if deleteIntfs:
             for bridge_name in self.bridges:
-                self.cmd(f"ip link delete {bridge_name}")
+                self.cmd("ip link delete {}".format(bridge_name))
 
             for tap_name in self.emu_port_taps.values():
-                self.cmd(f"ip link delete {tap_name}")
+                self.cmd("ip link delete {}".format(tap_name))
 
         return super().stop(deleteIntfs=deleteIntfs)
