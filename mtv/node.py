@@ -63,6 +63,8 @@ import libvirt
 import subprocess
 import ipaddress
 import tempfile
+import shutil
+import atexit
 import xml.etree.ElementTree as ET
 from distutils.version import StrictVersion
 from subprocess import Popen, PIPE
@@ -1815,7 +1817,7 @@ class DynamipsRouter(Switch):
         dynamips_image,
         dynamips_port_driver,
         dynamips_args,
-        **kwargs,
+        **kwargs
     ):
         """
         dynamips_platform: (str) The type of platform to emulate.
@@ -1859,13 +1861,17 @@ class DynamipsRouter(Switch):
         # The names of bridges used by this instance
         self.bridges = []
 
-        self._output_file = tempfile.NamedTemporaryFile()
         # self.process = None
 
         super().__init__(*args, **kwargs)
 
     _mapped_images = {}
     _tmp_image_files = []
+
+    @classmethod
+    def _cleanup_on_exit(cls):
+        for file in cls._tmp_image_files:
+            file.close()
 
     @classmethod
     def _process_image(cls, dynamips_image):
@@ -1889,10 +1895,6 @@ class DynamipsRouter(Switch):
             cls._mapped_images[dynamips_image] = dynamips_image
             return dynamips_image
 
-    @staticmethod
-    def cmd_verbose(node, cmd):
-        node.cmd(cmd)
-
     def start(self, controllers):
         pg = self.port_gen()
 
@@ -1905,30 +1907,27 @@ class DynamipsRouter(Switch):
             tap_name = "tap-{}-{}".format(self.name, port)
             bridge_name = "br-{}-{}".format(port, intf.name)
 
-            self.cmd_verbose(intf, "ip tuntap add mode tap {}".format(tap_name))
-            self.cmd_verbose(intf, "ip link set dev {} up".format(tap_name))
-            self.cmd_verbose(intf, "ip link add {} type bridge".format(bridge_name))
-            self.cmd_verbose(
-                intf, "ip link set {} master {}".format(tap_name, bridge_name)
-            )
-            self.cmd_verbose(
-                intf, "ip link set {} master {}".format(intf.name, bridge_name)
-            )
-            self.cmd_verbose(intf, "ip link set dev {} up".format(bridge_name))
+            intf.cmd("ip tuntap add mode tap {}".format(tap_name))
+            intf.cmd("ip link set dev {} up".format(tap_name))
+            intf.cmd("ip link add {} type bridge".format(bridge_name))
+            intf.cmd("ip link set {} master {}".format(tap_name, bridge_name))
+            intf.cmd("ip link set {} master {}".format(intf.name, bridge_name))
+            intf.cmd("ip link set dev {} up".format(bridge_name))
 
             # sometimes iptables likes to hurt us
-            self.cmd_verbose(
-                intf, "iptables -I FORWARD -p all -i {} -j ACCEPT".format(bridge_name)
-            )
+            intf.cmd("iptables -I FORWARD -p all -i {} -j ACCEPT".format(bridge_name))
 
             # self.tap_veths[tap_name] = intf.name
             self.emu_port_intfs[emu_port] = intf
             self.emu_port_taps[emu_port] = tap_name
             self.bridges.append(bridge_name)
 
-        self.config_file = tempfile.NamedTemporaryFile(mode="w+")
-        self.config_file.write(self.make_config())
-        self.config_file.flush()
+        self._output_file = tempfile.NamedTemporaryFile()
+        self._config_file = tempfile.NamedTemporaryFile(mode="w+")
+        self._config_file.write(self.make_config())
+        self._config_file.flush()
+
+        self._working_dir = tempfile.TemporaryDirectory()
 
         # print(self.config_file.name)
 
@@ -1941,7 +1940,7 @@ class DynamipsRouter(Switch):
             for (slot, port), tap_name in self.emu_port_taps.items()
         )
         cmd = "dynamips -C {} -P {} {} {} {} {}".format(
-            self.config_file.name,
+            self._config_file.name,
             self.dynamips_platform,
             args,
             port_drivers,
@@ -1953,9 +1952,10 @@ class DynamipsRouter(Switch):
         self.process = self.popen(
             cmd,
             mncmd=[],
+            cwd=self._working_dir.name,
             stdin=self._output_file,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=self._output_file,
+            stderr=self._output_file,
         )
 
     def connected(self):
@@ -2018,7 +2018,14 @@ class DynamipsRouter(Switch):
 
     def stop(self, deleteIntfs=True):
         print("bye")
-        self.process.kill()
+
+        try:
+            self.process.kill()
+            self._config_file.close()
+            self._output_file.close()
+            self._working_dir.cleanup()
+        except AttributeError:
+            pass
 
         if deleteIntfs:
             for bridge_name in self.bridges:
@@ -2028,3 +2035,6 @@ class DynamipsRouter(Switch):
                 self.cmd("ip link delete {}".format(tap_name))
 
         return super().stop(deleteIntfs=deleteIntfs)
+
+
+atexit.register(DynamipsRouter._cleanup_on_exit)
