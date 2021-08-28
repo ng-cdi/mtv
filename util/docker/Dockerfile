@@ -13,8 +13,8 @@ RUN apt-get update -q && \
   iproute2 \
   iputils-ping \
   net-tools \
-  openvswitch-common \ 
-  openvswitch-switch \ 
+  openvswitch-common \
+  openvswitch-switch \
   openvswitch-testcontroller \
   python3 \
   python3-bottle \
