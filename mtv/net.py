@@ -92,9 +92,9 @@ import select
 import signal
 import random
 import ipaddress
-import subprocess
 import _thread
 from subprocess import Popen
+from subprocess import run as sp_run
 from datetime import datetime
 import xml.etree.ElementTree as ET
 from time import sleep
@@ -104,7 +104,7 @@ from mtv.cli import CLI
 from mtv.rest import REST
 from mtv.log import info, error, debug, output, warn, metric
 from mtv.node import (Node, Host, OVSKernelSwitch, DefaultController,
-                      Controller, DHCPNode, VNode)
+                      Controller, DHCPNode, VNode, Docker)
 from mtv.nodelib import NAT
 from mtv.link import Link, Intf
 from mtv.util import (quietRun, fixLimits, numCores, ensureRoot,
@@ -1045,6 +1045,7 @@ class Virtualnet( Mininet ):
         #Enable DHCP if specified
         self.metrics = metrics 
         self.vnodes = []
+        self.containers = []
         self.dhcpnode = None
         self.containerID = None
         self.docker = docker
@@ -1065,6 +1066,7 @@ class Virtualnet( Mininet ):
             'ip' : None,
             'dhcp': False,
             'switches': None,
+            'links': None,
             'containerID': self.containerID
         }
         defaults.update( params )
@@ -1096,6 +1098,14 @@ class Virtualnet( Mininet ):
         except:
             debug( "Error: couldn't start thread" )
         return v
+
+    def addDocker( self, name, dimage=None, dcmd=None, build_params={}, **params ):
+        ip = self.getNextIP()
+        d = Docker( name, dimage, dcmd, build_params, **params )
+        self.containers.append(d)
+        self.nameToNode[ name ] = d
+        return d
+
     
     #Add Host to topology
     def addHost( self, name, cls=None, **params ):
@@ -1130,6 +1140,8 @@ class Virtualnet( Mininet ):
         info( '*** Starting %s vnodes\n' % len( self.vnodes ) )
         for vm in self.vnodes:
             vm.start()
+        for dc in self.containers:
+            dc.start()
     
     def stop( self ):
         "Terminate all running VMs in topology"

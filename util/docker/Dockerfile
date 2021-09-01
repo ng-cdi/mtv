@@ -36,6 +36,10 @@ COPY setup.py .
 COPY mtv/ mtv/
 COPY bin/ bin/
 RUN mkdir -p /etc/mtv
+RUN mkdir -p /var/run/netns
+
+# Unsure why necessary
+RUN pip3 install docker
 
 RUN pip3 install .
 
