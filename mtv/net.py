@@ -1102,6 +1102,7 @@ class Virtualnet( Mininet ):
     def addDocker( self, name, dimage=None, dcmd=None, build_params={}, **params ):
         ip = self.getNextIP()
         params['container_id'] = self.containerID
+        params['ip'] = ip
         d = Docker( name, dimage, dcmd, build_params, **params )
         self.containers.append(d)
         self.nameToNode[ name ] = d

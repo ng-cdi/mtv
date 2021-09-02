@@ -1815,6 +1815,7 @@ class Docker():
         self.dcinfo = None
         self.did = None
         self.pid = None
+        self.ip = kwargs.get("ip")
         self.switches = kwargs.get("switches")
         self.container_id = kwargs.get("container_id")
         self.dc = docker.from_env()
@@ -1933,9 +1934,13 @@ class Docker():
                 addVeth = sp_run( [ "ip", "link", "add", veth_docker, "type", "veth", "peer", 
                                   "name", veth_switch], stdout=PIPE, stderr=PIPE )
                 debug(addVeth)
+                sp_run(["ip", "link", "set", veth_switch, "up"])
                 setDVeth = sp_run( [ "ip", "link", "set", veth_docker, "netns", str(self.did) ], 
                     stdout=PIPE, stderr=PIPE )
                 debug(setDVeth)
+                sp_run(["ip", "netns", "exec", str(self.did), "ip", "link", "set", veth_docker, "up"])
+                vethaddr = sp_run(["ip", "netns", "exec", str(self.did), "ip", "addr", "add", str(self.ip), "dev", veth_docker], stdout=PIPE, stderr=PIPE)
+                debug(vethaddr)
                 setSVeth = sp_run( [ "ovs-vsctl", "add-port", switch_name, veth_switch ], 
                     stdout=PIPE, stderr=PIPE )
                 debug(setSVeth)
