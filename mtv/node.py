@@ -1887,7 +1887,7 @@ class Docker():
         )
 
         self.dc = self.d_api.create_container(
-            name="%s.%s" % (self.dnameprefix, name),
+            name="%s.%s-%s" % (self.dnameprefix, name, self.container_id),
             image=self.dimage,
             command=self.dcmd,
             entrypoint=list(), 
