@@ -1863,13 +1863,6 @@ class Docker():
                 _id, self.build_params.get("tag", None)))
             info(output)
 
-        # self._check_image_exists(dimage, True, _id=None)
-
-        debug("Created docker container object %s\n" % name)
-        debug("image: %s\n" % str(self.dimage))
-        debug("dcmd: %s\n" % str(self.dcmd))
-        info("%s: kwargs %s\n" % (name, str(kwargs)))
-
         hc = self.d_api.create_host_config(
             network_mode=self.config.get('network_mode'),
             privileged=False,
@@ -1888,23 +1881,20 @@ class Docker():
         )
 
         self.dc = self.d_api.create_container(
-            name="%s.%s-%s" % (self.dnameprefix, name, self.container_id),
+            #name="%s.%s-%s" % (self.dnameprefix, name, self.container_id),
             image=self.dimage,
             command=self.dcmd,
             entrypoint=list(), 
             stdin_open=True, 
             tty=True,
             environment=self.config.get('environment'),
-            #network_disabled=True,
+            network_disabled=True,
             host_config=hc,
             ports=self.config.get('ports'),
-            labels=['com.containernet'],
+            labels=[],
             volumes=None,
-            #volumes=[self._get_volume_mount_name(v) for v in self.volumes if self._get_volume_mount_name(v) is not None],
-            hostname=name
+            #hostname=name
         )
-        self.master = None
-        self.slave = Noneid = None
 
     def build( self ):
         if self.config.get("rm", False):
@@ -1917,10 +1907,8 @@ class Docker():
         return None
 
     def start( self ):
-        # start the container
         res = self.d_api.start( self.dc )
         debug( "Docker container %s started\n" % self.name )
-        # fetch information about new container
         self.dcinfo = self.d_api.inspect_container( self.dc )
         self.did = self.dcinfo.get( "Id" )
         pid = self.docker_pid()

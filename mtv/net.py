@@ -1036,8 +1036,6 @@ class Virtualnet( Mininet ):
     """
     A Mininet with Virtual Machine support (Libvirt)
     and VM ip configuration with DHCP (dnsmasq)
-    self.vIPBase = '10.0.1.0/8'
-    #self.vIPBaseNum, self.vPrefixLen = self.netParse( self.vIPBase )
     """
     def __init__( self, metrics=False, docker=False, **params ):
         Mininet.__init__( self, params )
@@ -1047,13 +1045,13 @@ class Virtualnet( Mininet ):
         self.vnodes = []
         self.containers = []
         self.dhcpnode = None
-        self.containerID = None
+        self.container_id = None
         self.docker = docker
         if docker == True:
-            self.containerID = self.getContainerID()
-            if self.containerID == None:
+            self.container_id = self.getContainerID()
+            if self.container_id == None:
                 error("Could not obtain container ID")
-            debug("CONTAINER ID: {}".format(self.containerID))
+            debug("CONTAINER ID: {}".format(self.container_id))
        
     #Add Libvirt Node to Topology
     def addVNode( self, name, domxml, **params ):
@@ -1067,7 +1065,7 @@ class Virtualnet( Mininet ):
             'dhcp': False,
             'switches': None,
             'links': None,
-            'containerID': self.containerID
+            'container_id': self.container_id
         }
         defaults.update( params )
 
@@ -1082,13 +1080,13 @@ class Virtualnet( Mininet ):
         domTree = ET.parse( domxml )
 
         if self.dhcpnode is not None:
-            self.dhcpnode.addHost( defaults['mac'], defaults[ 'ip' ] )
+            self.dhcpnode.addHost( defaults[ 'mac' ], defaults[ 'ip' ] )
         
         # Add Container Prefix to switch name if exits
         if self.docker is True and defaults[ 'switches' ] is not None:
             editedSwitches = []
             for i in defaults[ 'switches' ]:
-                editedSwitches.append( self.containerID[0:6] + '-' + i + '-' + name )
+                editedSwitches.append( self.container_id[0:6] + '-' + i + '-' + name )
                 defaults[ 'dockerswitches' ] = editedSwitches
         v = VNode( name, domTree, **defaults )
         self.vnodes.append( v )
@@ -1101,7 +1099,7 @@ class Virtualnet( Mininet ):
 
     def addDocker( self, name, dimage=None, dcmd=None, build_params={}, **params ):
         ip = self.getNextIP()
-        params['container_id'] = self.containerID
+        params['container_id'] = self.container_id
         params['ip'] = ip
         d = Docker( name, dimage, dcmd, build_params, **params )
         self.containers.append(d)
