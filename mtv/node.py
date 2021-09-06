@@ -1828,8 +1828,8 @@ class Docker():
             'mem_limit': None,
             'memswap_limit': None,
             'environment': {},
-            'volumes': [],  # use ["/home/user1/:/mnt/vol2:rw"]
-            'tmpfs': [], # use ["/home/vol1/:size=3G,uid=1000"]
+            'volumes': [],
+            'tmpfs': [],
             'network_mode': None,
             'publish_all_ports': True,
             'port_bindings': {},
@@ -1881,7 +1881,6 @@ class Docker():
         )
 
         self.dc = self.d_api.create_container(
-            #name="%s.%s-%s" % (self.dnameprefix, name, self.container_id),
             image=self.dimage,
             command=self.dcmd,
             entrypoint=list(), 
@@ -1893,7 +1892,6 @@ class Docker():
             ports=self.config.get('ports'),
             labels=[],
             volumes=None,
-            #hostname=name
         )
 
     def build( self ):
