@@ -60,6 +60,7 @@ import re
 import signal
 import select
 import libvirt
+import socket
 import subprocess
 import ipaddress
 import tempfile
@@ -1895,6 +1896,14 @@ class DynamipsRouter(Switch):
             cls._mapped_images[dynamips_image] = dynamips_image
             return dynamips_image
 
+    @staticmethod
+    def _find_free_port():
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind(('', 0))
+        _, port = s.getsockname()
+        s.close()
+        return port
+
     def start(self, controllers):
         pg = self.port_gen()
 
@@ -1931,6 +1940,8 @@ class DynamipsRouter(Switch):
 
         # print(self.config_file.name)
 
+        self._console_port = self._find_free_port()
+
         args = " ".join(self.dynamips_args)
         port_drivers = " ".join(
             "-p {}:{}".format(n, name) for name, n in self.port_drivers
@@ -1939,7 +1950,8 @@ class DynamipsRouter(Switch):
             "-s {}:{}:tap:{}".format(slot, port, tap_name)
             for (slot, port), tap_name in self.emu_port_taps.items()
         )
-        cmd = "dynamips -C {} -P {} {} {} {} {}".format(
+        cmd = "dynamips -T {} -C {} -P {} {} {} {} {}".format(
+            self._console_port,
             self._config_file.name,
             self.dynamips_platform,
             args,
@@ -1947,24 +1959,48 @@ class DynamipsRouter(Switch):
             taps,
             self.dynamips_image,
         )
-        # print(cmd)
 
         self.process = self.popen(
             cmd,
-            mncmd=[],
             cwd=self._working_dir.name,
-            stdin=self._output_file,
-            stdout=self._output_file,
-            stderr=self._output_file,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
 
+    @staticmethod
+    def _buffer_socket_to_lines(s: socket.socket):
+        s.settimeout(0.1)
+        buf = io.BytesIO()
+
+        while True:
+            try:
+                chunk = s.recv(2048)
+                buf.write(chunk)
+                buf.seek(0)
+
+                lines = buf.readlines()
+                last = lines.pop() if lines else b""
+                buf = io.BytesIO(last)
+
+                for line in lines:
+                    yield line.strip()
+            except socket.timeout:
+                for line in buf:
+                    yield line.strip()
+                break
+
     def connected(self):
-        with open(self._output_file.name) as f:
-            for line in f:
-                # this seems like a bit of a hack. but the router is likely ready
-                # as soon as it prints the welcome message.
-                if "Press RETURN to get started" in line:
-                    return True
+        try:
+            with socket.create_connection(("localhost", self._console_port)) as s:
+                # with open(self._output_file.name) as f:
+                for line in self._buffer_socket_to_lines(s):
+                    # this seems like a bit of a hack. but the router is likely ready
+                    # as soon as it prints the welcome message.
+                    if b"Press RETURN to get started" in line:
+                        return True
+        except ConnectionRefusedError:
+            pass
         return False
 
     def make_config(self) -> str:
