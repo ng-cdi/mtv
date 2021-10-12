@@ -92,9 +92,9 @@ import select
 import signal
 import random
 import ipaddress
-import subprocess
 import _thread
 from subprocess import Popen
+from subprocess import run as sp_run
 from datetime import datetime
 import xml.etree.ElementTree as ET
 from time import sleep
@@ -104,7 +104,7 @@ from mtv.cli import CLI
 from mtv.rest import REST
 from mtv.log import info, error, debug, output, warn, metric
 from mtv.node import (Node, Host, OVSKernelSwitch, DefaultController,
-                      Controller, DHCPNode, VNode)
+                      Controller, DHCPNode, VNode, Docker)
 from mtv.nodelib import NAT
 from mtv.link import Link, Intf
 from mtv.util import (quietRun, fixLimits, numCores, ensureRoot,
@@ -1036,8 +1036,6 @@ class Virtualnet( Mininet ):
     """
     A Mininet with Virtual Machine support (Libvirt)
     and VM ip configuration with DHCP (dnsmasq)
-    self.vIPBase = '10.0.1.0/8'
-    #self.vIPBaseNum, self.vPrefixLen = self.netParse( self.vIPBase )
     """
     def __init__( self, metrics=False, docker=False, **params ):
         Mininet.__init__( self, params )
@@ -1045,14 +1043,15 @@ class Virtualnet( Mininet ):
         #Enable DHCP if specified
         self.metrics = metrics 
         self.vnodes = []
+        self.containers = []
         self.dhcpnode = None
-        self.containerID = None
+        self.container_id = None
         self.docker = docker
         if docker == True:
-            self.containerID = self.getContainerID()
-            if self.containerID == None:
+            self.container_id = self.getContainerID()
+            if self.container_id == None:
                 error("Could not obtain container ID")
-            debug("CONTAINER ID: {}".format(self.containerID))
+            debug("CONTAINER ID: {}".format(self.container_id))
        
     #Add Libvirt Node to Topology
     def addVNode( self, name, domxml, **params ):
@@ -1065,7 +1064,8 @@ class Virtualnet( Mininet ):
             'ip' : None,
             'dhcp': False,
             'switches': None,
-            'containerID': self.containerID
+            'links': None,
+            'container_id': self.container_id
         }
         defaults.update( params )
 
@@ -1080,13 +1080,13 @@ class Virtualnet( Mininet ):
         domTree = ET.parse( domxml )
 
         if self.dhcpnode is not None:
-            self.dhcpnode.addHost( defaults['mac'], defaults[ 'ip' ] )
+            self.dhcpnode.addHost( defaults[ 'mac' ], defaults[ 'ip' ] )
         
         # Add Container Prefix to switch name if exits
         if self.docker is True and defaults[ 'switches' ] is not None:
             editedSwitches = []
             for i in defaults[ 'switches' ]:
-                editedSwitches.append( self.containerID[0:6] + '-' + i + '-' + name )
+                editedSwitches.append( self.container_id[0:6] + '-' + i + '-' + name )
                 defaults[ 'dockerswitches' ] = editedSwitches
         v = VNode( name, domTree, **defaults )
         self.vnodes.append( v )
@@ -1096,6 +1096,16 @@ class Virtualnet( Mininet ):
         except:
             debug( "Error: couldn't start thread" )
         return v
+
+    def addDocker( self, name, dimage=None, dcmd=None, build_params={}, **params ):
+        ip = self.getNextIP()
+        params['container_id'] = self.container_id
+        params['ip'] = ip
+        d = Docker( name, dimage, dcmd, build_params, **params )
+        self.containers.append(d)
+        self.nameToNode[ name ] = d
+        return d
+
     
     #Add Host to topology
     def addHost( self, name, cls=None, **params ):
@@ -1130,6 +1140,8 @@ class Virtualnet( Mininet ):
         info( '*** Starting %s vnodes\n' % len( self.vnodes ) )
         for vm in self.vnodes:
             vm.start()
+        for dc in self.containers:
+            dc.start()
     
     def stop( self ):
         "Terminate all running VMs in topology"

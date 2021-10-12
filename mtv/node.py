@@ -53,6 +53,7 @@ Future enhancements:
 """
 
 import io
+import inspect
 import os
 import sys
 import pty
@@ -61,6 +62,7 @@ import signal
 import select
 import libvirt
 import socket
+import docker
 import subprocess
 import ipaddress
 import tempfile
@@ -69,6 +71,7 @@ import atexit
 import xml.etree.ElementTree as ET
 from distutils.version import StrictVersion
 from subprocess import Popen, PIPE
+from subprocess import run as sp_run
 from time import sleep
 from itertools import count
 
@@ -1617,7 +1620,6 @@ def NullController(*_args, **_kwargs):
     "Nonexistent controller - simply returns None"
     return None
 
-
 class VNode( object ):
     """ A vNode (Virtualized Node) is a Virtual Machine, connected to 
     mininet via an OpenVSwitch bridge. """
@@ -1627,16 +1629,17 @@ class VNode( object ):
         self.domID = None
         self.hyperv = self.getHypervisor( domTree )
         self.mac = kwargs.get( 'mac' )
+        self.links = kwargs.get( 'links' )
+        self.docker = kwargs.get( 'docker' )
         self.switches = kwargs.get( 'switches' )
         self.containerID = kwargs.get( 'containerID' )
         self.dockerswitches = kwargs.get( 'dockerswitches' )
         if self.containerID is not None:
             self.rename( domTree, self.containerID )
-        if self.dockerswitches is not None:
-            for i in self.dockerswitches:
-                self.insertInterface( domTree, mac_addr=self.mac, switch=i )
-        else:
-            for i in self.switches:
+        if self.links is not None:
+            for i in self.links:
+                if self.docker == True:
+                    i = self.containerID[0:6] + '-' + i + '-' + self.name
                 self.insertInterface( domTree, mac_addr=self.mac, switch=i )
 
         self.XML = ET.tostring( domTree.getroot(), encoding="utf-8", method="xml").decode("utf8")
@@ -1699,24 +1702,24 @@ class VNode( object ):
         "Returns machine state using libvirt api"
         conn = self.getLibvirtConn()
         if conn == None:
-            print( 'Failed to open connection to libvirtd' )
+            debug( 'Failed to open connection to libvirtd' )
         else:
             dom = conn.lookupByID( self.domID )
             flag = dom.isActive()
             if dom == None:
-                print( 'Failed to find domain' )
+                debug( 'Failed to find domain' )
             else:
                 if flag == True:
-                    print( 'The domain is active' )
+                    debug( 'The domain is active' )
                 else:
-                    print( 'The domain is not active')
+                    debug( 'The domain is not active')
         conn.close()
 
     def getLibvirtConn( self ):
         "Return connection to hypervisor with libvirt api"
         hyperv = self.hyperv
         if self.hyperv == None:
-            print('Error: Hypervisor info was not extracted')
+            debug('Error: Hypervisor info was not extracted')
             return False
         try:
             if hyperv == 'kvm':
@@ -1724,7 +1727,7 @@ class VNode( object ):
             conn = libvirt.open( '{}+unix:///'.format( hyperv ) )
             return conn
         except:
-            print( 'Failed to acquire connection to hypervisor' )
+            debug( 'Failed to acquire connection to hypervisor' )
             sys.exit(1)
 
     def attachVethHost( self ):
@@ -1732,6 +1735,13 @@ class VNode( object ):
             vethname = i + "." + self.name
             disappointment = subprocess.run(['ovs-vsctl', 'add-port', i, vethname], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
+    def attachVethSwitch( self, switch_name ):
+        vethname = switch_name + "." + self.name
+        connect = subprocess.run(['ovs-vsctl', 'add-port', switch_name, vethname])
+
+    def attachVeth( self, host_name ):
+        vethname = host_name + "." + self.name
+        connect = subprocess.run([''])
 
 class DHCPNode( Node ):
 
@@ -1764,7 +1774,6 @@ class DHCPNode( Node ):
             os.remove( self.defaults[ 'conffile' ] )
         f = open( self.defaults[ 'conffile' ], 'a+' )
         f.close()
-        
 
     def start( self, **params ):
         "Start dnsmasq instance inside namespace"
@@ -2074,3 +2083,147 @@ class DynamipsRouter(Switch):
 
 
 atexit.register(DynamipsRouter._cleanup_on_exit)
+
+class Docker():
+
+    def __init__( self, name, dimage=None, dcmd=None, build_params={}, **kwargs):
+        self.name = name
+        self.dimage = dimage
+        self.dnameprefix = "mtv"
+        self.dcmd = dcmd if dcmd is not None else "/bin/bash"
+        self.build_params = build_params
+        self.dcinfo = None
+        self.did = None
+        self.pid = None
+        self.ip = kwargs.get("ip")
+        self.switches = kwargs.get("switches")
+        self.container_id = kwargs.get("container_id")
+        self.dc = docker.from_env()
+        self.d_api = self.dc.api
+        self.config = {
+            'cpu_quota': -1,
+            'cpu_period': None,
+            'cpu_shares': None,
+            'cpuset_cpus': None,
+            'mem_limit': None,
+            'memswap_limit': None,
+            'environment': {},
+            'volumes': [],
+            'tmpfs': [],
+            'network_mode': None,
+            'publish_all_ports': True,
+            'port_bindings': {},
+            'ports': [],
+            'dns': [],
+            'ipc_mode': None,
+            'devices': [],
+            'cap_add': ['net_admin'],  # we need this to allow mininet network setup
+            'storage_opt': None,
+            'sysctls': {},
+            'docker_sock': None
+        }
+        self.config.update( kwargs )
+
+        if 'net_admin' not in self.config['cap_add']:
+            self.config['cap_add'] += ['net_admin']
+
+        if self.config['docker_sock'] is None:
+            self.config['docker_sock'] = '/var/run/docker.sock'
+            debug("Warning: Docker Sock not specified. Using default location")
+            debug("If you're running MTV inside a docker container, you MUST pass the docker socket")
+
+        _id = None
+        if self.build_params.get("path", None):
+            if not self.build_params.get("tag", None):
+                if self.dimage:
+                    self.build_params["tag"] = dimage
+            _id, output = self.build(**self.build_params)
+            self.dimage = _id
+            info("Docker image built: id: {},  {}. Output:\n".format(
+                _id, self.build_params.get("tag", None)))
+            info(output)
+
+        hc = self.d_api.create_host_config(
+            network_mode=self.config.get('network_mode'),
+            privileged=False,
+            binds=self.config.get('volumes'),
+            tmpfs=self.config.get('tmpfs'),
+            publish_all_ports=self.config.get('publish_all_ports'),
+            port_bindings=self.config.get('port_bindings'),
+            mem_limit=self.config.get('mem_limit'),
+            cpuset_cpus=self.config.get('cpuset_cpus'),
+            dns=self.config.get('dns'),
+            ipc_mode=self.config.get('ipc_mode'),
+            devices=self.config.get('devices'),
+            cap_add=self.config.get('cap_add'),  
+            sysctls=self.config.get('sysctls'),
+            storage_opt=self.config.get('storage_opt')
+        )
+
+        self.dc = self.d_api.create_container(
+            image=self.dimage,
+            command=self.dcmd,
+            entrypoint=list(), 
+            stdin_open=True, 
+            tty=True,
+            environment=self.config.get('environment'),
+            network_disabled=True,
+            host_config=hc,
+            ports=self.config.get('ports'),
+            labels=[],
+            volumes=None,
+        )
+
+    def build( self ):
+        if self.config.get("rm", False):
+            container_list = self.d_api.containers(all=True)
+            for container in container_list:
+                for container_name in container.get("Names", []):
+                    if "%s.%s" % (self.dnameprefix, self.name) in container_name:
+                        self.d_api.remove_container(container="%s.%s" % (self.dnameprefix, name), force=True)
+                        break
+        return None
+
+    def start( self ):
+        res = self.d_api.start( self.dc )
+        debug( "Docker container %s started\n" % self.name )
+        self.dcinfo = self.d_api.inspect_container( self.dc )
+        self.did = self.dcinfo.get( "Id" )
+        pid = self.docker_pid()
+        sylink = sp_run( [ "ln", "-sf", "/proc/%s/ns/net" % (pid), "/var/run/netns/%s" % (self.did) ], 
+            stdout=PIPE, stderr=PIPE )
+        debug(sylink)
+        if self.switches is not None:
+            for switch_name in self.switches:
+                veth_docker = "%s-%s" % ( self.did[0:4], switch_name )
+                veth_switch= "%s-%s" % ( switch_name, self.did[0:4] )
+                addVeth = sp_run( [ "ip", "link", "add", veth_docker, "type", "veth", "peer", 
+                                  "name", veth_switch], stdout=PIPE, stderr=PIPE )
+                debug(addVeth)
+                sp_run(["ip", "link", "set", veth_switch, "up"])
+                setDVeth = sp_run( [ "ip", "link", "set", veth_docker, "netns", str(self.did) ], 
+                    stdout=PIPE, stderr=PIPE )
+                debug(setDVeth)
+                sp_run(["ip", "netns", "exec", str(self.did), "ip", "link", "set", veth_docker, "up"])
+                vethaddr = sp_run(["ip", "netns", "exec", str(self.did), "ip", "addr", "add", str(self.ip), "dev", veth_docker], stdout=PIPE, stderr=PIPE)
+                debug(vethaddr)
+                setSVeth = sp_run( [ "ovs-vsctl", "add-port", switch_name, veth_switch ], 
+                    stdout=PIPE, stderr=PIPE )
+                debug(setSVeth)
+        return None
+
+    def terminate( self ):
+        self.dc.stop()
+        self.dc.remove()
+        return None
+
+    def docker_pid( self ):
+        inspection = self.d_api.inspect_container(self.did)['State']['Pid']
+        if inspection is not None:
+            debug(inspection)
+            return inspection
+
+    def sendCmd( self, string ):
+        return None
+
+        
