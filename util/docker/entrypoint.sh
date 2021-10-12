@@ -35,8 +35,9 @@ if [ ! -z ${SCRIPT+x} ]; then
   becho "*** Running mininet via the Python API..."
   echo "*** Ignoring any command line flags"
   python3 $SCRIPT && clean_exit 0
+else
+  # Run MN with MN_FLAGS
+  becho "*** Running mininet using mn - flags: '$@'"
+  mn $@ && clean_exit 0
 fi
 
-# Run MN with MN_FLAGS
-becho "*** Running mininet using mn - flags: '$@'"
-mn $@ && clean_exit 0

@@ -6,28 +6,31 @@ FROM ${OPENFLOW_IMAGE} as openflow
 
 FROM debian:stretch-slim
 
-RUN apt-get update -q && \
-  apt-get install --no-install-recommends -yq \
-  arping \
-  hping3 \
-  iproute2 \
-  iputils-ping \
-  net-tools \
-  openvswitch-common \ 
-  openvswitch-switch \ 
-  openvswitch-testcontroller \
-  python3 \
-  python3-bottle \
-  python3-pip \
-  python3-setuptools \
-  telnet \
-  python-libvirt \
-  python3-libvirt \
-  virtinst \
-  libvirt-clients \
-  dnsmasq \
-  traceroute && \
-  rm -rf /var/lib/apt/lists/*
+RUN sed -i -e's/ main/ main contrib non-free/g' /etc/apt/sources.list && \
+    apt-get update -q && \
+    apt-get install --no-install-recommends -yq \
+    dynamips \
+    libpcap0.8 \
+    arping \
+    hping3 \
+    iproute2 \
+    iputils-ping \
+    net-tools \
+    openvswitch-common \
+    openvswitch-switch \
+    openvswitch-testcontroller \
+    python3 \
+    python3-bottle \
+    python3-pip \
+    python3-setuptools \
+    telnet \
+    python-libvirt \
+    python3-libvirt \
+    virtinst \
+    libvirt-clients \
+    dnsmasq \
+    traceroute && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY --from=openflow /usr/local/bin/ /usr/local/bin/
 COPY --from=mnexec /build/mnexec /usr/bin/mnexec
