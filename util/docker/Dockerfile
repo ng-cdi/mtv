@@ -6,7 +6,7 @@ FROM ${OPENFLOW_IMAGE} as openflow
 
 FROM debian:stretch-slim
 
-RUN sed -i -e's/ main/ main contrib non-free/g' /etc/apt/sources.list && \
+RUN sed -i -e 's/ main/ main contrib non-free/g' /etc/apt/sources.list && \
     apt-get update -q && \
     apt-get install --no-install-recommends -yq \
     dynamips \
