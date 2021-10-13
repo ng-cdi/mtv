@@ -2001,7 +2001,7 @@ class DynamipsRouter(Switch):
 
     def connected(self):
         try:
-            with socket.create_connection(("localhost", self._console_port)) as s:
+            with socket.create_connection(("127.0.0.1", self._console_port)) as s:
                 # with open(self._output_file.name) as f:
                 for line in self._buffer_socket_to_lines(s):
                     # this seems like a bit of a hack. but the router is likely ready
