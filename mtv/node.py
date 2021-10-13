@@ -1960,6 +1960,8 @@ class DynamipsRouter(Switch):
             self.dynamips_image,
         )
 
+        self._cmd = cmd
+
         self.process = self.popen(
             cmd,
             cwd=self._working_dir.name,
