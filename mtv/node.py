@@ -1813,6 +1813,7 @@ class DHCPNode( Node ):
                     return line.split(" ")[2]
         return None
 
+
 class DynamipsRouter(Switch):
     """A router that runs an instance of dynamip.
 
@@ -1825,16 +1826,29 @@ class DynamipsRouter(Switch):
         *args,
         dynamips_platform,
         dynamips_image,
-        dynamips_port_driver,
         dynamips_args,
+        dynamips_config=None,
+        dynamips_port_driver=None,
+        dynamips_ports=None,
         **kwargs
     ):
         """
         dynamips_platform: (str) The type of platform to emulate.
         dynamips_image: (str | file like) The file path, or file of the Cisco IOS to use.
-        dynamips_port_driver: (tuple[str, str, int]) The port adapter / network
+        dynamips_port_driver: (Optional[tuple[str, str, int]]) The port adapter / network
             module driver to use, it's name when configuring, and how many ports it has.
+            Mutually exclusive with `dynamips_config` and `dynamips_ports`.
         dynamips_args: (list[str]) Parameters to pass to dynamips.
+        dynamips_config: (Optional[str]) The config file to pass to dynamips.
+            If this is passed, no config will be auto-generated.
+            Mutually exclusive with `dynamips_port_driver`.
+            `dynamips_ports` must also be set if this is used.
+        dynamips_ports: (list[tuple[str, str, int, list[tuple[int, str]]]]) The ports that will exist
+            on this dynamips instance, as a tuple of (Driver Name, Interface Name, Slot, [port number, link dst])
+            These should be given if the ports/interfaces for the instance have been decided
+            beforehand.
+            Mutually exclusive with `dynamips_port_driver`.
+            `dynamips_config` must also be set if this is used.
         """
 
         self.dynamips_platform = dynamips_platform
@@ -1846,9 +1860,7 @@ class DynamipsRouter(Switch):
                     dynamips_image
                 )
             ) from e
-        self.dynamips_port_driver_key = dynamips_port_driver[0]
-        self.dynamips_port_driver_conf_key = dynamips_port_driver[1]
-        self.dynamips_port_driver_ports = dynamips_port_driver[2]
+
         self.dynamips_args = dynamips_args
 
         # type: dict[tuple[int, int], str]
@@ -1871,7 +1883,27 @@ class DynamipsRouter(Switch):
         # The names of bridges used by this instance
         self.bridges = []
 
-        # self.process = None
+        assert (dynamips_ports is not None) == (
+            dynamips_config is not None
+        ), "Setting one of these parameters requires setting the other"
+        assert ((dynamips_ports is not None) or (dynamips_config is not None)) ^ (
+            dynamips_port_driver is not None
+        ), "These should be mutually exclusive"
+
+        self.dynamips_config = dynamips_config
+        self.dynamips_ports = dynamips_ports
+        if dynamips_ports is not None:
+            self.dynamips_link_to_port = {
+                other_side: (pd, intf, slot, port)
+                for pd, intf, slot, other_sides in dynamips_ports
+                for (port, other_side) in other_sides
+            }
+            self.port_drivers = [(pd, slot) for pd, _, slot, _ in dynamips_ports]
+
+        if dynamips_port_driver is not None:
+            self.dynamips_port_driver_key = dynamips_port_driver[0]
+            self.dynamips_port_driver_conf_key = dynamips_port_driver[1]
+            self.dynamips_port_driver_ports = dynamips_port_driver[2]
 
         super().__init__(*args, **kwargs)
 
@@ -1908,19 +1940,49 @@ class DynamipsRouter(Switch):
     @staticmethod
     def _find_free_port():
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.bind(('', 0))
+        s.bind(("", 0))
         _, port = s.getsockname()
         s.close()
         return port
 
+    def port_gen(self):
+        """A generator that yields tuples of (slot_number, port_number) while
+        keeping track of how many port drivers have been used.
+        """
+        for pd_idx in count(1):
+            self.port_drivers.append((self.dynamips_port_driver_key, pd_idx))
+            for port_idx in range(self.dynamips_port_driver_ports):
+                yield (pd_idx, port_idx)
+
+    # def port_process(self):
+    #     """A generator that yields tuples of (slot_number, port_number).
+    #     This is used when the router config is provided
+    #     """
+    #     for pd, intf, slot, links in self.dynamips_ports:
+
+    def emu_port_for_intf(self, intf):
+        if intf.link.intf1.node is self:
+            other_side = intf.link.intf2.node
+        else:
+            other_side = intf.link.intf1.node
+
+        _, _, slot, port = self.dynamips_link_to_port[other_side.name]
+        return (slot, port)
+
     def start(self, controllers):
-        pg = self.port_gen()
+        if self.dynamips_config is None:
+            pg = self.port_gen()
+        else:
+            pg = None
 
         for intf, port in self.ports.items():
             if intf.name == "lo":
                 continue
 
-            emu_port = next(pg)
+            if pg is not None:
+                emu_port = next(pg)
+            else:
+                emu_port = self.emu_port_for_intf(intf)
 
             tap_name = "tap-{}-{}".format(self.name, port)
             bridge_name = "br-{}-{}".format(port, intf.name)
@@ -1942,7 +2004,11 @@ class DynamipsRouter(Switch):
 
         self._output_file = tempfile.NamedTemporaryFile()
         self._config_file = tempfile.NamedTemporaryFile(mode="w+")
-        self._config_file.write(self.make_config())
+
+        if self.dynamips_config:
+            self._config_file.write(self.dynamips_config)
+        else:
+            self._config_file.write(self.make_config())
         self._config_file.flush()
 
         self._working_dir = tempfile.TemporaryDirectory()
@@ -2045,15 +2111,6 @@ class DynamipsRouter(Switch):
         out.append("end")
 
         return "\n".join(out)
-
-    def port_gen(self):
-        """A generator that yields tuples of (slot_number, port_number) while
-        keeping track of how many port drivers have been used.
-        """
-        for pd_idx in count(1):
-            self.port_drivers.append((self.dynamips_port_driver_key, pd_idx))
-            for port_idx in range(self.dynamips_port_driver_ports):
-                yield (pd_idx, port_idx)
 
     @classmethod
     def setup(cls):
