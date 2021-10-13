@@ -1632,14 +1632,14 @@ class VNode( object ):
         self.links = kwargs.get( 'links' )
         self.docker = kwargs.get( 'docker' )
         self.switches = kwargs.get( 'switches' )
-        self.containerID = kwargs.get( 'containerID' )
+        self.container_id = kwargs.get( 'container_id' )
         self.dockerswitches = kwargs.get( 'dockerswitches' )
-        if self.containerID is not None:
-            self.rename( domTree, self.containerID )
+        if self.container_id is not None:
+            self.rename( domTree, self.container_id )
         if self.links is not None:
             for i in self.links:
                 if self.docker == True:
-                    i = self.containerID[0:6] + '-' + i + '-' + self.name
+                    i = self.container_id[0:6] + '-' + i + '-' + self.name
                 self.insertInterface( domTree, mac_addr=self.mac, switch=i )
 
         self.XML = ET.tostring( domTree.getroot(), encoding="utf-8", method="xml").decode("utf8")
@@ -1677,10 +1677,10 @@ class VNode( object ):
             return 'kvm'
         return None
 
-    def rename( self, domTree, containerID ):
+    def rename( self, domTree, container_id ):
         root = domTree.getroot()
         name = root.find( 'name' )
-        name.text= 'mtv-' + containerID + '-' + self.name
+        name.text= 'mtv-' + container_id + '-' + self.name
 
     def insertInterface( self, domTree, switch, mac_addr=None, docker_prefix=None ):
         root = domTree.getroot()
@@ -2090,7 +2090,7 @@ class Docker():
         self.name = name
         self.dimage = dimage
         self.dnameprefix = "mtv"
-        self.dcmd = dcmd if dcmd is not None else "/bin/bash"
+        self.dcmd = dcmd if dcmd is not None else ""
         self.build_params = build_params
         self.dcinfo = None
         self.did = None
@@ -2098,7 +2098,7 @@ class Docker():
         self.ip = kwargs.get("ip")
         self.switches = kwargs.get("switches")
         self.container_id = kwargs.get("container_id")
-        self.dc = docker.from_env()
+        self.dc = docker.DockerClient(base_url='unix://var/run/docker.sock')
         self.d_api = self.dc.api
         self.config = {
             'cpu_quota': -1,
@@ -2161,17 +2161,19 @@ class Docker():
         )
 
         self.dc = self.d_api.create_container(
+            name="%s.%s-%s" % (self.dnameprefix, name, self.container_id),
             image=self.dimage,
             command=self.dcmd,
             entrypoint=list(), 
             stdin_open=True, 
             tty=True,
             environment=self.config.get('environment'),
-            network_disabled=True,
+            #network_disabled=True,
             host_config=hc,
             ports=self.config.get('ports'),
             labels=[],
             volumes=None,
+            hostname=name
         )
 
     def build( self ):
@@ -2185,9 +2187,10 @@ class Docker():
         return None
 
     def start( self ):
-        res = self.d_api.start( self.dc )
+        self.d_api.start( container=self.dc.get( 'Id' ) )
         debug( "Docker container %s started\n" % self.name )
         self.dcinfo = self.d_api.inspect_container( self.dc )
+        debug("\n\n\n\nDCINFO {}\n\n\n\n".format(self.dcinfo))
         self.did = self.dcinfo.get( "Id" )
         pid = self.docker_pid()
         sylink = sp_run( [ "ln", "-sf", "/proc/%s/ns/net" % (pid), "/var/run/netns/%s" % (self.did) ], 
@@ -2218,9 +2221,10 @@ class Docker():
         return None
 
     def docker_pid( self ):
+        debug("\n\nPID {}\n\n".format(self.did))
         inspection = self.d_api.inspect_container(self.did)['State']['Pid']
         if inspection is not None:
-            debug(inspection)
+            debug("INSPECTION\n\n {}".format(inspection))
             return inspection
 
     def sendCmd( self, string ):

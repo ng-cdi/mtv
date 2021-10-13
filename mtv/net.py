@@ -496,7 +496,7 @@ class Mininet(object):
                     self.addController('c%d' % i, cls)
 
         info( '*** Adding hosts:\n' )
-        if topo.hosts() != None:
+        if topo.hosts() is not None:
             for hostName in topo.hosts():
                 self.addHost( hostName, **topo.nodeInfo( hostName ) )
                 info( hostName + ' ' )
@@ -1038,20 +1038,20 @@ class Virtualnet( Mininet ):
     and VM ip configuration with DHCP (dnsmasq)
     """
     def __init__( self, metrics=False, docker=False, **params ):
-        Mininet.__init__( self, params )
-
-        #Enable DHCP if specified
+        Mininet.__init__(self, params)
         self.metrics = metrics 
+        self.docker = docker
         self.vnodes = []
         self.containers = []
         self.dhcpnode = None
         self.container_id = None
-        self.docker = docker
-        if docker == True:
+        if docker is True:
             self.container_id = self.getContainerID()
-            if self.container_id == None:
+            if self.container_id is None:
                 error("Could not obtain container ID")
             debug("CONTAINER ID: {}".format(self.container_id))
+
+
        
     #Add Libvirt Node to Topology
     def addVNode( self, name, domxml, **params ):
@@ -1158,8 +1158,9 @@ class Virtualnet( Mininet ):
         else:
             error( 'Error: XML File Invalid' )
             return False
- 
-    def getContainerID( self ):
+    
+    @staticmethod
+    def getContainerID():
         cgroupFile = open("/proc/self/cgroup")
         text = cgroupFile.read()
         cgroupFile.close()
