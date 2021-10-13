@@ -1861,28 +1861,6 @@ class DynamipsRouter(Switch):
                 )
             ) from e
 
-        assert (
-            dynamips_ports is not None == dynamips_config is not None
-        ), "Setting one of these parameters requires setting the other"
-        assert (dynamips_ports is not None or dynamips_config is not None) ^ (
-            dynamips_port_driver is not None
-        ), "These should be mutually exclusive"
-
-        self.dynamips_config = dynamips_config
-        self.dynamips_ports = dynamips_ports
-        if dynamips_ports is not None:
-            self.dynamips_link_to_port = {
-                other_side: (pd, intf, slot, port)
-                for pd, intf, slot, other_sides in dynamips_ports
-                for (port, other_side) in other_sides
-            }
-            self.port_drivers = [(pd, slot) for pd, _, slot, _ in dynamips_ports]
-
-        if dynamips_port_driver is not None:
-            self.dynamips_port_driver_key = dynamips_port_driver[0]
-            self.dynamips_port_driver_conf_key = dynamips_port_driver[1]
-            self.dynamips_port_driver_ports = dynamips_port_driver[2]
-
         self.dynamips_args = dynamips_args
 
         # type: dict[tuple[int, int], str]
@@ -1905,7 +1883,27 @@ class DynamipsRouter(Switch):
         # The names of bridges used by this instance
         self.bridges = []
 
-        # self.process = None
+        assert (dynamips_ports is not None) == (
+            dynamips_config is not None
+        ), "Setting one of these parameters requires setting the other"
+        assert ((dynamips_ports is not None) or (dynamips_config is not None)) ^ (
+            dynamips_port_driver is not None
+        ), "These should be mutually exclusive"
+
+        self.dynamips_config = dynamips_config
+        self.dynamips_ports = dynamips_ports
+        if dynamips_ports is not None:
+            self.dynamips_link_to_port = {
+                other_side: (pd, intf, slot, port)
+                for pd, intf, slot, other_sides in dynamips_ports
+                for (port, other_side) in other_sides
+            }
+            self.port_drivers = [(pd, slot) for pd, _, slot, _ in dynamips_ports]
+
+        if dynamips_port_driver is not None:
+            self.dynamips_port_driver_key = dynamips_port_driver[0]
+            self.dynamips_port_driver_conf_key = dynamips_port_driver[1]
+            self.dynamips_port_driver_ports = dynamips_port_driver[2]
 
         super().__init__(*args, **kwargs)
 
