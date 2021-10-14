@@ -2168,7 +2168,7 @@ class Docker():
             stdin_open=True, 
             tty=True,
             environment=self.config.get('environment'),
-            #network_disabled=True,
+            network_disabled=True,
             host_config=hc,
             ports=self.config.get('ports'),
             labels=[],
@@ -2187,10 +2187,9 @@ class Docker():
         return None
 
     def start( self ):
-        self.d_api.start( container=self.dc.get( 'Id' ) )
+        res = self.d_api.start( container=self.dc.get( 'Id' ) )
         debug( "Docker container %s started\n" % self.name )
         self.dcinfo = self.d_api.inspect_container( self.dc )
-        debug("\n\n\n\nDCINFO {}\n\n\n\n".format(self.dcinfo))
         self.did = self.dcinfo.get( "Id" )
         pid = self.docker_pid()
         sylink = sp_run( [ "ln", "-sf", "/proc/%s/ns/net" % (pid), "/var/run/netns/%s" % (self.did) ], 
