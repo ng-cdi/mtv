@@ -1909,6 +1909,22 @@ class DynamipsRouter(Switch):
 
     _mapped_images = {}
     _tmp_image_files = []
+    _tap_count = 0
+    _bridge_count = 0
+
+    @classmethod
+    def get_tap(cls):
+        n = cls._tap_count
+        cls._tap_count += 1
+
+        return "tap-dyna-{}".format(n)
+
+    @classmethod
+    def get_bridge(cls):
+        n = cls._bridge_count
+        cls._bridge_count += 1
+
+        return "br-dyna-{}".format(n)
 
     @classmethod
     def _cleanup_on_exit(cls):
@@ -1984,8 +2000,8 @@ class DynamipsRouter(Switch):
             else:
                 emu_port = self.emu_port_for_intf(intf)
 
-            tap_name = "tap-{}-{}".format(self.name, port)
-            bridge_name = "br-{}-{}".format(port, intf.name)
+            tap_name = self.get_tap()
+            bridge_name = self.get_bridge()
 
             intf.cmd("ip tuntap add mode tap {}".format(tap_name))
             intf.cmd("ip link set dev {} up".format(tap_name))
@@ -2034,6 +2050,9 @@ class DynamipsRouter(Switch):
             taps,
             self.dynamips_image,
         )
+
+        self._cmd = cmd
+        print(cmd)
 
         self.process = self.popen(
             cmd,
