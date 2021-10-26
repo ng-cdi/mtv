@@ -1610,8 +1610,8 @@ def NullController(*_args, **_kwargs):
     "Nonexistent controller - simply returns None"
     return None
 
-class VNode( object ):
-    """ A vNode (Virtualized Node) is a Virtual Machine, connected to 
+class Libvirt( object ):
+    """ A Libvirt (Virtualized Node) is a Virtual Machine, connected to 
     mininet via an OpenVSwitch bridge. """
 
     def __init__( self, name, domTree, **kwargs ):

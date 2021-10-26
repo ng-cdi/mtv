@@ -101,10 +101,10 @@ from time import sleep
 from itertools import chain, groupby
 from math import ceil
 from mtv.cli import CLI
-from mtv.rest import REST
+from mtv.rest import RESTs
 from mtv.log import info, error, debug, output, warn, metric
 from mtv.node import (Node, Host, OVSKernelSwitch, DefaultController,
-                      Controller, DHCPNode, VNode, Docker)
+                      Controller, DHCPNode, Libvirt, Docker)
 from mtv.nodelib import NAT
 from mtv.link import Link, Intf
 from mtv.util import (quietRun, fixLimits, numCores, ensureRoot,
@@ -1054,7 +1054,7 @@ class Virtualnet( Mininet ):
             debug("CONTAINER ID: {}".format(self.container_id))
        
     #Add Libvirt Node to Topology
-    def addVNode( self, name, domxml, **params ):
+    def addLibvirt( self, name, domxml, **params ):
         """Add a virtual node to the Mininet network
            domxml: Path to libvirt xml file
         """
@@ -1078,7 +1078,6 @@ class Virtualnet( Mininet ):
             defaults[ 'ip' ] = self.getNextIP()
 
         domTree = ET.parse( domxml )
-
         if self.dhcpnode is not None:
             self.dhcpnode.addHost( defaults[ 'mac' ], defaults[ 'ip' ] )
         
@@ -1088,7 +1087,7 @@ class Virtualnet( Mininet ):
             for i in defaults[ 'switches' ]:
                 editedSwitches.append( self.container_id[0:6] + '-' + i + '-' + name )
                 defaults[ 'dockerswitches' ] = editedSwitches
-        v = VNode( name, domTree, **defaults )
+        v = Libvirt( name, domTree, **defaults )
         self.vnodes.append( v )
         self.nameToNode[ name ] = v
         try:
@@ -1179,5 +1178,5 @@ class Virtualnet( Mininet ):
             if ip is not None:
                 metric( 'VM UP: {}'.format( name ) )
                 return True
-        debug( "Timed out waiting for VNode DHCP Lease" )
+        debug( "Timed out waiting for Libvirt DHCP Lease" )
         return False
