@@ -1078,6 +1078,7 @@ class Virtualnet( Mininet ):
             defaults[ 'ip' ] = self.getNextIP()
 
         domTree = ET.parse( domxml )
+
         if self.dhcpnode is not None:
             self.dhcpnode.addHost( defaults[ 'mac' ], defaults[ 'ip' ] )
         
@@ -1091,7 +1092,7 @@ class Virtualnet( Mininet ):
         self.vnodes.append( v )
         self.nameToNode[ name ] = v
         try:
-            _thread.start_new_thread( self.pollVNode, ( name, defaults[ 'mac' ] ) )
+            _thread.start_new_thread( self.pollLibvirt, ( name, defaults[ 'mac' ] ) )
         except:
             debug( "Error: couldn't start thread" )
         return v
@@ -1105,7 +1106,6 @@ class Virtualnet( Mininet ):
         self.nameToNode[ name ] = d
         return d
 
-    
     #Add Host to topology
     def addHost( self, name, cls=None, **params ):
         start = datetime.now()
@@ -1166,7 +1166,7 @@ class Virtualnet( Mininet ):
         match = pattern.search(text)
         return text[match.start()+7:match.end()] 
 
-    def pollVNode( self, name, mac ):
+    def pollLibvirt( self, name, mac ):
         if self.dhcpnode == None:
             debug( 'DHCPNODE NOT HERE' )
             return False
