@@ -164,9 +164,9 @@ class REST(Bottle):
     def __pingFrom(self):
         host = self.mn.get(request.query.host)
         dst = request.query.dst
-        result = host.cmd('ping -c1 %s', dst)
-        sent, received, _, rttavg, _, _ = self.mn._parsePing(result)
-        assert sent <= received
+        result = host.cmd('ping -c1 %s' % dst)
+        sent, received, _, rttavg, _, _ = self.mn._parsePingFull(result)
+        assert received <= sent
         lost = sent - received
         pct = 100.0 * lost / sent
 
