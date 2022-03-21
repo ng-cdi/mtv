@@ -61,6 +61,7 @@ class REST(Bottle):
         self.route(self.prefix+'/node/<node_name>', callback=self.__getNode)
         self.route(self.prefix+'/stop', callback=self.__stop)
         self.route(self.prefix+'/pingset', callback=self.__pingSet)
+        self.route(self.prefix+'/pingfrom', callback=self.__pingFrom)
         self.route(self.prefix+'/pingall', callback=self.__pingAll)
 
         self.route(self.prefix+'/iperfpair', callback=self.__iperfPair)
@@ -159,6 +160,26 @@ class REST(Bottle):
             return self.__build_response(data, code=400)
         results = self.mn.pingFull(hosts=hosts)
         return self.__returnPingData(results)
+
+    def __pingFrom(self):
+        host = self.mn.get(request.query.host)
+        dst = request.query.dst
+        result = host.cmd('ping -c1 %s', dst)
+        sent, received, _, rttavg, _, _ = self.mn._parsePing(result)
+        assert sent <= received
+        lost = sent - received
+        pct = 100.0 * lost / sent
+
+        data = {
+            ("%s-%s" % (request.query.host, dst)):
+            {"sender": request.query.host,
+             "target": dst,
+             "sent": sent,
+             "received": received,
+             "rtt_avg": rttavg}
+        }
+
+        return self.__build_response(data)
 
     def __pingAll(self):
         results = self.mn.pingAllFull()
