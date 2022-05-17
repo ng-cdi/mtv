@@ -1830,6 +1830,7 @@ class DynamipsRouter(Switch):
         dynamips_config=None,
         dynamips_port_driver=None,
         dynamips_ports=None,
+        dynamips_console_port=None,
         **kwargs
     ):
         """
@@ -1849,6 +1850,7 @@ class DynamipsRouter(Switch):
             beforehand.
             Mutually exclusive with `dynamips_port_driver`.
             `dynamips_config` must also be set if this is used.
+        dynamips_console_port: (Optional[int]) The local port the router should bind to.
         """
 
         self.dynamips_platform = dynamips_platform
@@ -1904,6 +1906,8 @@ class DynamipsRouter(Switch):
             self.dynamips_port_driver_key = dynamips_port_driver[0]
             self.dynamips_port_driver_conf_key = dynamips_port_driver[1]
             self.dynamips_port_driver_ports = dynamips_port_driver[2]
+
+        self._console_port = dynamips_console_port
 
         super().__init__(*args, **kwargs)
 
@@ -2031,7 +2035,8 @@ class DynamipsRouter(Switch):
 
         # print(self.config_file.name)
 
-        self._console_port = self._find_free_port()
+        if self._console_port is None:
+            self._console_port = self._find_free_port()
 
         args = " ".join(self.dynamips_args)
         port_drivers = " ".join(
