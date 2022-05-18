@@ -1839,6 +1839,7 @@ class DynamipsRouter(Switch):
         dynamips_port_driver: (Optional[tuple[str, str, int]]) The port adapter / network
             module driver to use, it's name when configuring, and how many ports it has.
             Mutually exclusive with `dynamips_config` and `dynamips_ports`.
+            For example: ("PA-FE-TX", "FastEthernet", 1)
         dynamips_args: (list[str]) Parameters to pass to dynamips.
         dynamips_config: (Optional[str]) The config file to pass to dynamips.
             If this is passed, no config will be auto-generated.
@@ -1890,7 +1891,7 @@ class DynamipsRouter(Switch):
         ), "Setting one of these parameters requires setting the other"
         assert ((dynamips_ports is not None) or (dynamips_config is not None)) ^ (
             dynamips_port_driver is not None
-        ), "These should be mutually exclusive"
+        ), "Either dynamips_ports and dynamips_config must be provided, or dynamips_port_driver provided"
 
         self.dynamips_config = dynamips_config
         self.dynamips_ports = dynamips_ports
