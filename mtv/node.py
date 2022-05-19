@@ -2090,6 +2090,11 @@ class DynamipsRouter(Switch):
                     yield line.strip()
                 break
 
+    @staticmethod
+    def _format_mac_for_cisco(mac):
+        a, b, c, d, e, f = mac.split(":")
+        return f"{a}{b}.{c}{d}.{e}{f}"
+
     def connected(self):
         try:
             with socket.create_connection(("127.0.0.1", self._console_port)) as s:
@@ -2129,6 +2134,7 @@ class DynamipsRouter(Switch):
                         self.dynamips_port_driver_conf_key, slot, port
                     ),
                     "ip address {} {}".format(intf.ip, intf_mask),
+                    "mac-address {}".format(DynamipsRouter._format_mac_for_cisco(intf.mac)),
                     "no shut",
                 ]
             )
