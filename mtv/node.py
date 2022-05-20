@@ -2134,7 +2134,7 @@ class DynamipsRouter(Switch):
                         self.dynamips_port_driver_conf_key, slot, port
                     ),
                     "ip address {} {}".format(intf.ip, intf_mask),
-                    "mac-address {}".format(DynamipsRouter._format_mac_for_cisco(intf.mac)),
+                    # "mac-address {}".format(DynamipsRouter._format_mac_for_cisco(intf.mac)),
                     "no shut",
                 ]
             )
