@@ -69,6 +69,11 @@ class Intf(object):
         "Run a command in our owning node"
         return self.node.cmd(*args, **kwargs)
 
+    def cmdPrint(self, *args):
+        """Call cmd and printing its output
+           cmd: string"""
+        return self.cmd(*args, **{'verbose': True})
+
     def ifconfig(self, *args):
         "Configure ourselves using ifconfig"
         return self.cmd('ifconfig', self.name, *args)

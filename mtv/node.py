@@ -401,10 +401,10 @@ class Node(object):
             warn('(%s exited - ignoring cmd%s)\n' % (self, args))
         return None
 
-    def cmdPrint(self, *args):
+    def cmdPrint(self, *args, **kwargs):
         """Call cmd and printing its output
            cmd: string"""
-        return self.cmd(*args, **{'verbose': True})
+        return self.cmd(*args, **{'verbose': True}, **kwargs)
 
     def popen(self, *args, **kwargs):
         """Return a Popen() object in our namespace
@@ -2008,15 +2008,18 @@ class DynamipsRouter(Switch):
             tap_name = self.get_tap()
             bridge_name = self.get_bridge()
 
-            intf.cmd("ip tuntap add mode tap {}".format(tap_name))
-            intf.cmd("ip link set dev {} up".format(tap_name))
-            intf.cmd("ip link add {} type bridge".format(bridge_name))
-            intf.cmd("ip link set {} master {}".format(tap_name, bridge_name))
-            intf.cmd("ip link set {} master {}".format(intf.name, bridge_name))
-            intf.cmd("ip link set dev {} up".format(bridge_name))
+            # intf.cmdPrint("ip link delete {}".format(tap_name))
+            # intf.cmdPrint("ip link delete {}".format(bridge_name))
+            intf.cmdPrint("ip tuntap add mode tap {}".format(tap_name))
+            intf.cmdPrint("ip link set dev {} up".format(tap_name))
+            intf.cmdPrint("ip link add {} type bridge".format(bridge_name))
+            intf.cmdPrint("ip link set {} master {}".format(tap_name, bridge_name))
+            intf.cmdPrint("ip link set {} master {}".format(intf.name, bridge_name))
+            intf.cmdPrint("ip link set dev {} up".format(bridge_name))
 
             # sometimes iptables likes to hurt us
-            intf.cmd("iptables -I FORWARD -p all -i {} -j ACCEPT".format(bridge_name))
+            intf.cmdPrint("iptables -I FORWARD -p all -i {} -j ACCEPT".format(bridge_name))
+            intf.cmdPrint("iptables -I FORWARD -p all -i {} -j ACCEPT".format(bridge_name))
 
             # self.tap_veths[tap_name] = intf.name
             self.emu_port_intfs[emu_port] = intf
@@ -2162,10 +2165,10 @@ class DynamipsRouter(Switch):
 
         if deleteIntfs:
             for bridge_name in self.bridges:
-                self.cmd("ip link delete {}".format(bridge_name))
+                self.cmdPrint("ip link delete {}".format(bridge_name))
 
             for tap_name in self.emu_port_taps.values():
-                self.cmd("ip link delete {}".format(tap_name))
+                self.cmdPrint("ip link delete {}".format(tap_name))
 
         return super().stop(deleteIntfs=deleteIntfs)
 
