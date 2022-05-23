@@ -1813,6 +1813,360 @@ class DHCPNode( Node ):
                     return line.split(" ")[2]
         return None
 
+class DynamipsHostRouter(Host):
+    """A router that runs an instance of dynamip.
+    """
+
+    def __init__(
+        self,
+        *args,
+        dynamips_platform,
+        dynamips_image,
+        dynamips_args,
+        dynamips_config=None,
+        dynamips_port_driver=None,
+        dynamips_ports=None,
+        dynamips_console_port=None,
+        **kwargs
+    ):
+        """
+        dynamips_platform: (str) The type of platform to emulate.
+        dynamips_image: (str | file like) The file path, or file of the Cisco IOS to use.
+        dynamips_port_driver: (Optional[tuple[str, str, int]]) The port adapter / network
+            module driver to use, it's name when configuring, and how many ports it has.
+            Mutually exclusive with `dynamips_config` and `dynamips_ports`.
+            For example: ("PA-FE-TX", "FastEthernet", 1)
+        dynamips_args: (list[str]) Parameters to pass to dynamips.
+        dynamips_config: (Optional[str]) The config file to pass to dynamips.
+            If this is passed, no config will be auto-generated.
+            Mutually exclusive with `dynamips_port_driver`.
+            `dynamips_ports` must also be set if this is used.
+        dynamips_ports: (list[tuple[str, str, int, list[tuple[int, str]]]]) The ports that will exist
+            on this dynamips instance, as a tuple of (Driver Name, Interface Name, Slot, [port number, link dst])
+            These should be given if the ports/interfaces for the instance have been decided
+            beforehand.
+            Mutually exclusive with `dynamips_port_driver`.
+            `dynamips_config` must also be set if this is used.
+        dynamips_console_port: (Optional[int]) The local port the router should bind to.
+        """
+
+        self.dynamips_platform = dynamips_platform
+        try:
+            self.dynamips_image = self._process_image(dynamips_image)
+        except Exception as e:
+            raise Exception(
+                "We failed to process the provided dynamips image: {}".format(
+                    dynamips_image
+                )
+            ) from e
+
+        self.dynamips_args = dynamips_args
+
+        # type: dict[tuple[int, int], str]
+        # map of (slot_idx, port_idx) -> tap device name
+        self.emu_port_taps = dict()
+
+        # type: dict[str, str]
+        # map of tap device name -> veth device name
+        # self.tap_veths = dict()
+
+        # type: dict[tuple[int, int], Intf]
+        # map of (slot_idx, port_idx) -> mininet interface
+        self.emu_port_intfs = dict()
+
+        # type: list[tuple[str, int]]
+        # the port drivers used, a list of pairs of the driver name and slot number
+        self.port_drivers = []
+
+        # type: list[str]
+        # The names of bridges used by this instance
+        self.bridges = []
+
+        assert (dynamips_ports is not None) == (
+            dynamips_config is not None
+        ), "Setting one of these parameters requires setting the other"
+        assert ((dynamips_ports is not None) or (dynamips_config is not None)) ^ (
+            dynamips_port_driver is not None
+        ), "Either dynamips_ports and dynamips_config must be provided, or dynamips_port_driver provided"
+
+        self.dynamips_config = dynamips_config
+        self.dynamips_ports = dynamips_ports
+        if dynamips_ports is not None:
+            self.dynamips_link_to_port = {
+                other_side: (pd, intf, slot, port)
+                for pd, intf, slot, other_sides in dynamips_ports
+                for (port, other_side) in other_sides
+            }
+            self.port_drivers = [(pd, slot) for pd, _, slot, _ in dynamips_ports]
+
+        if dynamips_port_driver is not None:
+            self.dynamips_port_driver_key = dynamips_port_driver[0]
+            self.dynamips_port_driver_conf_key = dynamips_port_driver[1]
+            self.dynamips_port_driver_ports = dynamips_port_driver[2]
+
+        self._console_port = dynamips_console_port
+
+        super().__init__(*args, **kwargs)
+
+    _mapped_images = {}
+    _tmp_image_files = []
+    _tap_count = 0
+    _bridge_count = 0
+
+    @classmethod
+    def get_tap(cls):
+        n = cls._tap_count
+        cls._tap_count += 1
+
+        return "tap-dyna-{}".format(n)
+
+    @classmethod
+    def get_bridge(cls):
+        n = cls._bridge_count
+        cls._bridge_count += 1
+
+        return "br-dyna-{}".format(n)
+
+    @classmethod
+    def _cleanup_on_exit(cls):
+        for file in cls._tmp_image_files:
+            file.close()
+
+    @classmethod
+    def _process_image(cls, dynamips_image):
+        image = cls._mapped_images.get(dynamips_image)
+        if image is not None:
+            return image
+
+        if isinstance(dynamips_image, io.BufferedIOBase):
+            tmp_file = tempfile.NamedTemporaryFile()
+            dynamips_image.seek(0)
+            shutil.copyfileobj(dynamips_image, tmp_file)
+
+            cls._mapped_images[dynamips_image] = tmp_file.name
+            cls._tmp_image_files.append(tmp_file)
+
+            return tmp_file.name
+
+        # assume file name/ path
+        with open(dynamips_image) as _:
+            # just checking it exists
+            cls._mapped_images[dynamips_image] = dynamips_image
+            return dynamips_image
+
+    @staticmethod
+    def _find_free_port():
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind(("", 0))
+        _, port = s.getsockname()
+        s.close()
+        return port
+
+    def port_gen(self):
+        """A generator that yields tuples of (slot_number, port_number) while
+        keeping track of how many port drivers have been used.
+        """
+        for pd_idx in count(1):
+            self.port_drivers.append((self.dynamips_port_driver_key, pd_idx))
+            for port_idx in range(self.dynamips_port_driver_ports):
+                yield (pd_idx, port_idx)
+
+    # def port_process(self):
+    #     """A generator that yields tuples of (slot_number, port_number).
+    #     This is used when the router config is provided
+    #     """
+    #     for pd, intf, slot, links in self.dynamips_ports:
+
+    def emu_port_for_intf(self, intf):
+        if intf.link.intf1.node is self:
+            other_side = intf.link.intf2.node
+        else:
+            other_side = intf.link.intf1.node
+
+        _, _, slot, port = self.dynamips_link_to_port[other_side.name]
+        return (slot, port)
+
+    def start(self, controllers):
+        if self.dynamips_config is None:
+            pg = self.port_gen()
+        else:
+            pg = None
+
+        for intf, port in self.ports.items():
+            if intf.name == "lo":
+                continue
+
+            if pg is not None:
+                emu_port = next(pg)
+            else:
+                emu_port = self.emu_port_for_intf(intf)
+
+            tap_name = self.get_tap()
+            bridge_name = self.get_bridge()
+
+            # intf.cmdPrint("ip link delete {}".format(tap_name))
+            # intf.cmdPrint("ip link delete {}".format(bridge_name))
+            intf.cmdPrint("ip tuntap add mode tap {}".format(tap_name))
+            intf.cmdPrint("ip link set dev {} up".format(tap_name))
+            intf.cmdPrint("ip link add {} type bridge".format(bridge_name))
+            intf.cmdPrint("ip link set {} master {}".format(tap_name, bridge_name))
+            intf.cmdPrint("ip link set {} master {}".format(intf.name, bridge_name))
+            intf.cmdPrint("ip link set dev {} up".format(bridge_name))
+
+            # sometimes iptables likes to hurt us
+            intf.cmdPrint("iptables -I FORWARD -p all -i {} -j ACCEPT".format(bridge_name))
+            intf.cmdPrint("iptables -I FORWARD -p all -i {} -j ACCEPT".format(bridge_name))
+
+            # self.tap_veths[tap_name] = intf.name
+            self.emu_port_intfs[emu_port] = intf
+            self.emu_port_taps[emu_port] = tap_name
+            self.bridges.append(bridge_name)
+
+        self._output_file = tempfile.NamedTemporaryFile()
+        self._config_file = tempfile.NamedTemporaryFile(mode="w+")
+
+        if self.dynamips_config:
+            self._config_file.write(self.dynamips_config)
+        else:
+            self._config_file.write(self.make_config())
+        self._config_file.flush()
+
+        self._working_dir = tempfile.TemporaryDirectory()
+
+        # print(self.config_file.name)
+
+        if self._console_port is None:
+            self._console_port = self._find_free_port()
+
+        args = " ".join(self.dynamips_args)
+        port_drivers = " ".join(
+            "-p {}:{}".format(n, name) for name, n in self.port_drivers
+        )
+        taps = " ".join(
+            "-s {}:{}:tap:{}".format(slot, port, tap_name)
+            for (slot, port), tap_name in self.emu_port_taps.items()
+        )
+        cmd = "dynamips -T {} -C {} -P {} {} {} {} {}".format(
+            self._console_port,
+            self._config_file.name,
+            self.dynamips_platform,
+            args,
+            port_drivers,
+            taps,
+            self.dynamips_image,
+        )
+
+        self._cmd = cmd
+        print(cmd)
+
+        self.process = self.popen(
+            cmd,
+            cwd=self._working_dir.name,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    @staticmethod
+    def _buffer_socket_to_lines(s: socket.socket):
+        s.settimeout(0.1)
+        buf = io.BytesIO()
+
+        while True:
+            try:
+                chunk = s.recv(2048)
+                buf.write(chunk)
+                buf.seek(0)
+
+                lines = buf.readlines()
+                last = lines.pop() if lines else b""
+                buf = io.BytesIO(last)
+
+                for line in lines:
+                    yield line.strip()
+            except socket.timeout:
+                for line in buf:
+                    yield line.strip()
+                break
+
+    @staticmethod
+    def _format_mac_for_cisco(mac):
+        a, b, c, d, e, f = mac.split(":")
+        return f"{a}{b}.{c}{d}.{e}{f}"
+
+    def connected(self):
+        try:
+            with socket.create_connection(("127.0.0.1", self._console_port)) as s:
+                # with open(self._output_file.name) as f:
+                for line in self._buffer_socket_to_lines(s):
+                    # this seems like a bit of a hack. but the router is likely ready
+                    # as soon as it prints the welcome message.
+                    if b"Press RETURN to get started" in line:
+                        return True
+        except ConnectionRefusedError:
+            pass
+        return False
+
+    def make_config(self) -> str:
+        out = [
+            "hostname {}".format(self.name),
+            "ip routing",
+        ]
+
+        out.extend(["router rip", "version 2"])
+
+        for (slot, port), intf in self.emu_port_intfs.items():
+            if intf.ip is None or intf.prefixLen is None:
+                raise Exception(
+                    "The interface {} of node {} is lacking an assigned ip address.".format(
+                        intf, self
+                    )
+                )
+            net = ipaddress.ip_interface("{}/{}".format(intf.ip, intf.prefixLen))
+            out.append("network {}".format(net.network.network_address))
+
+        for (slot, port), intf in self.emu_port_intfs.items():
+            (intf_mask, _) = ipaddress.IPv4Network._make_netmask(intf.prefixLen)
+            out.extend(
+                [
+                    "interface {} {}/{}".format(
+                        self.dynamips_port_driver_conf_key, slot, port
+                    ),
+                    "ip address {} {}".format(intf.ip, intf_mask),
+                    # "mac-address {}".format(DynamipsRouter._format_mac_for_cisco(intf.mac)),
+                    "no shut",
+                ]
+            )
+
+        out.append("end")
+
+        return "\n".join(out)
+
+    @classmethod
+    def setup(cls):
+        "Ensure any dependencies are loaded; if not, try to load them."
+        if not os.path.exists("/dev/net/tun"):
+            moduleDeps(add=TUN)
+
+    def stop(self, deleteIntfs=True):
+        print("bye")
+
+        try:
+            self.process.kill()
+            self._config_file.close()
+            self._output_file.close()
+            self._working_dir.cleanup()
+        except AttributeError:
+            pass
+
+        if deleteIntfs:
+            for bridge_name in self.bridges:
+                self.cmdPrint("ip link delete {}".format(bridge_name))
+
+            for tap_name in self.emu_port_taps.values():
+                self.cmdPrint("ip link delete {}".format(tap_name))
+
+        return super().stop(deleteIntfs=deleteIntfs)
 
 class DynamipsRouter(Switch):
     """A router that runs an instance of dynamip.
@@ -2174,6 +2528,7 @@ class DynamipsRouter(Switch):
 
 
 atexit.register(DynamipsRouter._cleanup_on_exit)
+atexit.register(DynamipsHostRouter._cleanup_on_exit)
 
 class Docker():
 
