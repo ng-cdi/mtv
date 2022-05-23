@@ -1986,7 +1986,7 @@ class DynamipsHostRouter(Host):
         _, _, slot, port = self.dynamips_link_to_port[other_side.name]
         return (slot, port)
 
-    def start(self, controllers):
+    def start(self):
         if self.dynamips_config is None:
             pg = self.port_gen()
         else:
